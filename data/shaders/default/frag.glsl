@@ -1,10 +1,11 @@
-#version 410 core
+#version 450 core
 out vec4 oColor;
 
 in vec3 sNormal;
 
 uniform vec3 uSunDir;
 uniform vec4 uSunCol;
+uniform sampler2D uTexture;
 
 void main() {
 	// float shade = clamp(dot(uSunDir, sNormal), 0.1, 1.0);

@@ -71,7 +71,6 @@ build/main
 
 > Note: in order of importance.
 
-- Add texture support.
 - Add gltf loading support with cgltf.
 - Add webgpu backend and backend system.
 - Add Dear ImGui or something similar.

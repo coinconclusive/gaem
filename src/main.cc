@@ -7,6 +7,7 @@
 #include <nlohmann_json.hpp>
 #include <tiny_obj_loader.h>
 #include <cgltf.h>
+#include <stb_image.h>
 #include <uuid.h>
 
 #include <cstdio>
@@ -551,6 +552,14 @@ namespace gfx {
 			}
 		}
 
+		void set_uniform(const char *name, int v) const {
+			glProgramUniform1i(id, glGetUniformLocation(id, name), v);
+		}
+
+		void set_uniform(const char *name, float v) const {
+			glProgramUniform1f(id, glGetUniformLocation(id, name), v);
+		}
+
 		void set_uniform(const char *name, glm::vec2 v) const {
 			glProgramUniform2f(id, glGetUniformLocation(id, name),
 				v.x, v.y);
@@ -570,6 +579,37 @@ namespace gfx {
 			glProgramUniformMatrix4fv(id, glGetUniformLocation(id, name),
 				1, GL_FALSE, glm::value_ptr(v));
 		}
+	};
+
+	class texture {
+		friend ::gfx::renderer;
+		GLuint id;
+		glm::ivec2 size;
+	public:
+		void unload(::res::res_manager &m, const ::res::res_id_type &rid) {
+			glDeleteTextures(1, &id);
+		}
+
+		void load_from_file(::res::res_manager &m, const ::res::res_id_type &rid, const stdfs::path &path) {
+			std::cerr << "  .---------------\n";
+			std::cerr << "-: loading texture\n";
+			std::cerr << "  `---------------\n";
+			std::cerr << "     path: " << path << "\n";
+			
+			int channels;
+			uint8_t *data = stbi_load(path.c_str(), &size.x, &size.y, &channels, 4);
+			glCreateTextures(GL_TEXTURE_2D, 1, &id);
+			glTextureParameteri(id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			glTextureParameteri(id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			glTextureParameteri(id, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTextureParameteri(id, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+			glTextureStorage2D(id, 1, GL_RGBA8, size.x, size.y);
+			glTextureSubImage2D(id, 0, 0, 0, size.x, size.y, GL_RGBA, GL_UNSIGNED_BYTE, data);
+			stbi_image_free(data);
+		}
+
+		glm::ivec2 get_size() const { return size; }
 	};
 
 	enum class mesh_mode {
@@ -935,19 +975,19 @@ namespace gfx {
 	};
 
 	class renderer {
-		GLuint bound_vao = 0, bound_shader = 0;
+		GLuint bound_vao = 0, bound_program = 0;
 		bool depth_test = false;
 
 		::res::res_manager &resman;
 
-		void bind_vao(GLuint vao) {
+		void bind_vao_(GLuint vao) {
 			if(bound_vao != vao)
 				glBindVertexArray(bound_vao = vao);
 		}
 
-		void bind_shader(GLuint shader) {
-			if(bound_shader != shader)
-				glUseProgram(shader);
+		void bind_program_(GLuint program) {
+			if(bound_program != program)
+				glUseProgram(bound_program = program);
 		}
 
 		void set_depth_test(bool enabled) {
@@ -980,7 +1020,7 @@ namespace gfx {
 		}
 
 		void render(const ::gfx::mesh &mesh) {
-			bind_vao(mesh.vao);
+			bind_vao_(mesh.vao);
 			if(mesh.indexed) {
 				glDrawElements((GLenum)mesh.mode, mesh.index_count, GL_UNSIGNED_SHORT, nullptr);
 			} else {
@@ -990,13 +1030,17 @@ namespace gfx {
 
 		void render(const ::gfx::model &model) {
 			for(const auto &[mesh, material] : model.parts) {
-				bind_shader(material.get_from(resman).shader.get_from(resman).id);
+				bind_program_(material.get_from(resman).shader.get_from(resman).id);
 				render(mesh.get_from(resman));
 			}
 		}
 
-		void use(const ::gfx::shader &shader) {
-			bind_shader(shader.id);
+		void bind_shader(const ::gfx::shader &shader) {
+			bind_program_(shader.id);
+		}
+
+		void bind_texture(int unit, const ::gfx::texture &texture) {
+			glBindTextureUnit(unit, texture.id);
 		}
 	};
 }
@@ -1063,7 +1107,7 @@ int main(int argc, char *argv[]) {
 
 	gfx::renderer rend{resman};
 	rend.init();
-	rend.use(default_shader.get_from(resman));
+	rend.bind_shader(default_shader.get_from(resman));
 	
 	transform trans /* :o */ = {
 		.pos = glm::vec3(0.0f, 0.0f, 0.0f),
@@ -1093,6 +1137,7 @@ int main(int argc, char *argv[]) {
 	default_shader.context_from(resman, [&](const gfx::shader &shader) {
 		shader.set_uniform("uSunDir", sun.dir);
 		shader.set_uniform("uSunCol", sun.col);
+		shader.set_uniform("uTexture", 0);
 	});
 
 	float last_time = gfx::backend_glfw::get_time();
