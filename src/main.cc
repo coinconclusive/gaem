@@ -532,7 +532,7 @@ namespace gfx {
 			glCompileShader(fs);
 
 			glGetShaderiv(fs, GL_COMPILE_STATUS, &success);
-			if(success != GL_TRUE) {
+			if(!success) {
 				GLchar message[1024];
 				glGetShaderInfoLog(fs, 1024, nullptr, message);
 				::util::fail_error("failed to compile fragment shader:\n", message);
