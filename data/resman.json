@@ -1,0 +1,22 @@
+{
+	"resources": [
+		{
+			"provider": "shader",
+			"path": "data/shaders/default", 
+			"uuid": "b8cd65e7-2a72-4b03-bded-d8b82fdb2585",
+			"name": "shader.default"
+		},
+		{
+			"provider": "material",
+			"path": "data/materials/default.json", 
+			"uuid": "3964aab5-477a-4e2c-821d-83bc4bd6b715",
+			"name": "material.default"
+		},
+		{
+			"provider": "mesh",
+			"path": "data/meshes/cube.obj",
+			"uuid": "2cbbc8c5-c487-4625-8215-d93397658f13",
+			"name": "mesh.cube"
+		}
+	]
+}

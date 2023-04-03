@@ -1,0 +1,10 @@
+rule cc
+  command = $cc $cflags -c $in -o $out -MD -MF $out.d
+  depfile = $out.d
+
+rule cxx
+  command = $cxx $cxxflags -c $in -o $out -MD -MF $out.d
+  depfile = $out.d
+
+rule ld
+  command = $ld $lflags $in -o $out
