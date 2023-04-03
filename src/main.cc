@@ -4,7 +4,7 @@
 #include <glm/ext.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/hash.hpp>
-#include <nlohmann/json.hpp>
+#include <nlohmann_json.hpp>
 #include <tiny_obj_loader.h>
 #include <cgltf.h>
 #include <uuid.h>
@@ -33,6 +33,26 @@ namespace res { class res_id_type; }
 std::ostream &operator<<(std::ostream &os, const ::res::res_id_type &id);
 
 namespace util {
+	template<typename T>
+	struct event {
+	public:
+		template<typename ...Args>
+		void dispatch(Args &&...args) const {
+			for(const auto &handler : handlers)
+				handler(std::forward<Args>(args)...);    
+		}
+
+		void add_handler(T &&t) {
+			handlers.push_back(std::move(t));
+		}
+
+		void remove_handler(const T &t) {
+			handlers.push_back(std::move(t));
+		}
+	private:
+		std::set<std::function<T>> handlers;
+	};
+
 	template<typename A, typename B>
 	struct combined { const A &a; const B &b; };
 
@@ -829,6 +849,7 @@ namespace gfx {
 	class window {
 		GLFWwindow *window;
 		glm::vec2 delta_scroll = glm::vec2(0.0f, 0.0f);
+		::util::event<void(glm::ivec2 new_size)> resize_handler;
 	public:
 		void init(const char *title, glm::ivec2 size) {
 			if(!::gfx::backend_glfw::is_initialized()) ::util::fail_error("GLFW not initlaized.");
