@@ -7,8 +7,9 @@ uniform vec3 uSunDir;
 uniform vec4 uSunCol;
 
 void main() {
-	// float shade = clamp(dot(sNormal, uSunDir), 0.1, 1.0);
+	// float shade = clamp(dot(uSunDir, sNormal), 0.1, 1.0);
 	// vec3 shadeColor = uSunCol.xyz * shade * uSunCol.w;
 	// vec3 color = vec3(1.0, 1.0, 1.0) * shadeColor;
-	oColor = vec4((sNormal + 1.0) / 2.0, 1.0);
+	vec3 color = (sNormal + 1.0) / 2.0;
+	oColor = vec4(color, 1.0);
 }

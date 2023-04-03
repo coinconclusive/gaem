@@ -17,6 +17,12 @@
 			"path": "data/meshes/cube.obj",
 			"uuid": "2cbbc8c5-c487-4625-8215-d93397658f13",
 			"name": "mesh.cube"
+		},
+		{
+			"provider": "mesh",
+			"path": "data/meshes/house.obj",
+			"uuid": "cd0d8df0-1586-461b-8b3f-84dc99c00608",
+			"name": "mesh.house"
 		}
 	]
 }

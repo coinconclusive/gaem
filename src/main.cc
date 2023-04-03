@@ -828,6 +828,7 @@ namespace gfx {
 
 	class window {
 		GLFWwindow *window;
+		glm::vec2 delta_scroll = glm::vec2(0.0f, 0.0f);
 	public:
 		void init(const char *title, glm::ivec2 size) {
 			if(!::gfx::backend_glfw::is_initialized()) ::util::fail_error("GLFW not initlaized.");
@@ -837,11 +838,20 @@ namespace gfx {
 			glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 			window = glfwCreateWindow(size.x, size.y, title, nullptr, nullptr);
 			if(window == nullptr) ::util::fail_error("Failed to create GLFW window");
+			glfwSetWindowUserPointer(window, this);
+
+			glfwSetScrollCallback(window, [](GLFWwindow *window, double x_offset, double y_offset) {
+				auto *self = (decltype(this))glfwGetWindowUserPointer(window);
+				self->delta_scroll = glm::vec2(x_offset, y_offset);
+			});
 		}
 		
 		void bind() { glfwMakeContextCurrent(window); }
 		bool is_open() { return !glfwWindowShouldClose(window); }
-		void swap() { glfwSwapBuffers(window); }
+		void update() {
+			delta_scroll = glm::vec2(0.0f, 0.0f);
+			glfwSwapBuffers(window);
+		}
 
 		void close() { return glfwSetWindowShouldClose(window, 1); }
 
@@ -873,6 +883,10 @@ namespace gfx {
 			glm::dvec2 pos;
 			glfwGetCursorPos(window, &pos.x, &pos.y);
 			return pos;
+		}
+
+		glm::vec2 get_scroll_delta() const {
+			return delta_scroll;
 		}
 	};
 
@@ -993,10 +1007,11 @@ int main(int argc, char *argv[]) {
 	resman.load_from_file("data/resman.json");
 	auto default_shader = resman.get_resource<gfx::shader>("shader.default");
 	auto default_material = resman.get_resource<gfx::material>("material.default");
-	auto default_cube = resman.get_resource<gfx::mesh>("mesh.cube");
 	default_shader.preload_from(resman);
 	default_material.preload_from(resman);
-	default_cube.preload_from(resman);
+
+	std::vector<std::string> mesh_names = { "mesh.cube", "mesh.house" };
+	int current_mesh_index = 0;
 
 	gfx::renderer rend{resman};
 	rend.init();
@@ -1019,7 +1034,7 @@ int main(int argc, char *argv[]) {
 	};
 
 	struct { glm::vec3 dir; glm::vec4 col; } sun = {
-		.dir = glm::normalize(glm::vec3(1.0f, -2.0f, -0.6f)),
+		.dir = glm::normalize(glm::vec3(1.0f, 2.0f, -0.6f)),
 		.col = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f)
 	};
 
@@ -1031,10 +1046,12 @@ int main(int argc, char *argv[]) {
 	float last_time = gfx::backend_glfw::get_time();
 	glm::vec2 last_mouse_pos = window.get_mouse_position();
 
+	bool right_left_key_was_down = false;
+
 	while(window.is_open()) {
+		gfx::backend_glfw::poll_events();
 		float current_time = gfx::backend_glfw::get_time();
 		float delta_time = current_time - last_time;
-		(void)delta_time;
 
 		glm::vec2 current_mouse_pos = window.get_mouse_position();
 		glm::vec2 delta_mouse_pos = current_mouse_pos - last_mouse_pos;
@@ -1045,20 +1062,37 @@ int main(int argc, char *argv[]) {
 			cam.rot.y = glm::clamp(cam.rot.y, glm::epsilon<float>(), +glm::pi<float>());
 		}
 
+		float delta_scroll = window.get_scroll_delta().y;
+		cam.range -= delta_scroll * 20.0f * delta_time;
+		cam.range = glm::clamp(cam.range, glm::epsilon<float>(), 100.0f);
+
 		if(window.get_key(256 /* escape */)) window.close();
+
+		if(window.get_key(262 /* right */)) {
+			if(!right_left_key_was_down)
+				current_mesh_index = (current_mesh_index + 1) % mesh_names.size();
+			right_left_key_was_down = true;
+		} else if(window.get_key(263 /* left */)) {
+			if(!right_left_key_was_down)
+				current_mesh_index = (current_mesh_index - 1) % mesh_names.size();
+			right_left_key_was_down = true;
+		} else {
+			right_left_key_was_down = false;
+		}
 
 		default_shader.context_from(resman, [&](const gfx::shader &shader) {
 			shader.set_uniform("uTransform", cam.matrix() * trans.matrix());
 		});
 
+		auto current_mesh = resman.get_resource<gfx::mesh>(mesh_names[current_mesh_index]);
+
 		rend.pre_render();
-		rend.render(default_cube.get_from(resman));
+		rend.render(current_mesh.get_from(resman));
 		rend.post_render();
 
-		window.swap();
+		window.update();
 		last_time = current_time;
 		last_mouse_pos = current_mouse_pos;
-		gfx::backend_glfw::poll_events();
 	}
 
 	resman.delete_all();
