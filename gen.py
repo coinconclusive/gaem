@@ -92,24 +92,21 @@ for rule in p["rules"]:
 
 	r = rules[name]
 
-	match opt:
-		case 'ins':
-			r.ins = []
-			y: str = Tstr(v).eval(ns, global_ns).strip()
-			if len(y) > 0:
-				r.ins.extend(y.split())
-				
-		case 'out':
+	if opt == 'ins':
+		r.ins = []
+		y: str = Tstr(v).eval(ns, global_ns).strip()
+		if len(y) > 0:
+			r.ins.extend(y.split())
+	elif opt == 'out':
 			r.out = []
 			y: str = Tstr(v).eval(ns, global_ns).strip()
 			if len(y) > 0:
 				r.out.extend(y.split())
-				
-		case 'pat':
-			r.pat = v
-		case _:
-			print(f"bad opt {opt} (in {name}.{opt})")
-			exit(1)
+	elif opt == 'pat':
+		r.pat = v
+	else:
+		print(f"bad opt {opt} (in {name}.{opt})")
+		exit(1)
 	
 	if r.ins is not None:
 		ns[f"{name}.ins"] = ' '.join(r.ins)
