@@ -34,24 +34,38 @@ std::ostream &operator<<(std::ostream &os, const ::res::res_id_type &id);
 
 namespace util {
 	template<typename T>
-	struct event {
+	class event_hook;
+
+	template<typename T>
+	class event {
+		friend event_hook<T>;
 	public:
-		template<typename ...Args>
+		template<typename ...Args> requires std::invocable<std::function<T>, Args...>
 		void dispatch(Args &&...args) const {
 			for(const auto &handler : handlers)
 				handler(std::forward<Args>(args)...);    
 		}
-
-		void add_handler(T &&t) {
-			handlers.push_back(std::move(t));
-		}
-
-		void remove_handler(const T &t) {
-			handlers.push_back(std::move(t));
-		}
 	private:
-		std::set<std::function<T>> handlers;
+		std::vector<std::function<T>> handlers;
 	};
+
+	template<typename T>
+	class event_hook {
+		::util::event<T> &event;
+	public:
+		event_hook(::util::event<T> &event) : event(event) {}
+
+		template<typename F>
+		void add(F &&f) {
+			event.handlers.push_back(std::move(f));
+		}
+
+		template<typename F>
+		void add(const F &f) {
+			event.handlers.push_back(f);
+		}
+	};
+
 
 	template<typename A, typename B>
 	struct combined { const A &a; const B &b; };
@@ -849,14 +863,14 @@ namespace gfx {
 	class window {
 		GLFWwindow *window;
 		glm::vec2 delta_scroll = glm::vec2(0.0f, 0.0f);
-		::util::event<void(glm::ivec2 new_size)> resize_handler;
+		::util::event<void(glm::ivec2 new_size)> resize_event;
 	public:
 		void init(const char *title, glm::ivec2 size) {
 			if(!::gfx::backend_glfw::is_initialized()) ::util::fail_error("GLFW not initlaized.");
 			glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
 			glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
 			glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-			glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+			glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 			window = glfwCreateWindow(size.x, size.y, title, nullptr, nullptr);
 			if(window == nullptr) ::util::fail_error("Failed to create GLFW window");
 			glfwSetWindowUserPointer(window, this);
@@ -864,6 +878,11 @@ namespace gfx {
 			glfwSetScrollCallback(window, [](GLFWwindow *window, double x_offset, double y_offset) {
 				auto *self = (decltype(this))glfwGetWindowUserPointer(window);
 				self->delta_scroll = glm::vec2(x_offset, y_offset);
+			});
+
+			glfwSetFramebufferSizeCallback(window, [](GLFWwindow *window, int width, int height) {
+				auto *self = (decltype(this))glfwGetWindowUserPointer(window);
+				self->resize_event.dispatch(glm::ivec2(width, height));
 			});
 		}
 		
@@ -909,6 +928,10 @@ namespace gfx {
 		glm::vec2 get_scroll_delta() const {
 			return delta_scroll;
 		}
+
+		auto get_resize_hook() -> ::util::event_hook<void(glm::ivec2)> {
+			return ::util::event_hook<void(glm::ivec2)>(resize_event);
+		}
 	};
 
 	class renderer {
@@ -946,6 +969,10 @@ namespace gfx {
 			glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 			set_depth_test(true);
+		}
+
+		void viewport(glm::vec2 vp) {
+			glViewport(0.0f, 0.0f, vp.x, vp.y);
 		}
 
 		void post_render() {
@@ -1054,6 +1081,10 @@ int main(int argc, char *argv[]) {
 		.z_far = 100.0f
 	};
 
+	window.get_resize_hook().add([&](glm::ivec2 size) {
+		cam.aspect = window.aspect();
+	});
+
 	struct { glm::vec3 dir; glm::vec4 col; } sun = {
 		.dir = glm::normalize(glm::vec3(1.0f, 2.0f, -0.6f)),
 		.col = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f)
@@ -1108,6 +1139,7 @@ int main(int argc, char *argv[]) {
 		auto current_mesh = resman.get_resource<gfx::mesh>(mesh_names[current_mesh_index]);
 
 		rend.pre_render();
+		rend.viewport(window.size());
 		rend.render(current_mesh.get_from(resman));
 		rend.post_render();
 
