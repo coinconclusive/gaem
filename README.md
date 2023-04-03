@@ -4,7 +4,7 @@ Tiny experiment with modern OpenGL and C++20.
 
 ![rotated cube with normals on black background](data/screenshot.png)
 
-> Controls: LMB drag to rotate camera.
+> Controls: LMB drag to rotate camera. Left/Right to switch meshes.
 
 ## Building
 
