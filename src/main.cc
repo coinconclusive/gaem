@@ -32,6 +32,7 @@ namespace nmann = nlohmann;
 using namespace std::literals;
 // namespace stdch = std::chrono;
 
+/* null-terminated string view. (alias) */
 using strv = std::string_view;
 
 namespace res {
@@ -88,40 +89,126 @@ namespace util::log {
 		std::FILE *file_;
 		bool had_nl_ = true;
 		int indent_ = 0;
+		int spread_out_ = 0;
+		bool buffering_ = true;
+		int buffer_indent_ = 0;
+		std::vector<char> buffer_;
 
-		void output_indent_(int i) {
-			while(i --> 0) fputc(' ', file_);
+		static constexpr const char *style_gray_ = "\033[90m";
+		static constexpr const char *style_none_ = "\033[m";
+		static constexpr const char *bar_string_ = "│ " ; // "| ";
+		static constexpr const char *val_string_ = "├╴ "; // "|- ";
+		static constexpr const char *end_string_ = "╰╴ "; // "`- ";
+
+		void puts_(strv s) {
+			if(buffering_)
+				buffer_.insert(buffer_.end(), s.begin(), s.end());
+			else std::fputs(s.data(), file_);
+		}
+
+		void putc_(char c) {
+			if(buffering_) buffer_.push_back(c);
+			else std::fputc(c, file_);
+		}
+
+		void output_indent_(int indent) {
+			std::fputs(style_gray_, file_);
+			for(int i = 0; i < indent; ++i)
+				std::fputs(bar_string_, file_);
+			std::fputs(style_none_, file_);
+		}
+
+		void maybe_flush_(bool always = false) {
+			// when not buffering, this function is called
+			// to update indentation (before writing the
+			// indented message).
+
+			// when buffering, this functions is called
+			// to output the stored buffer (and clear it)
+			// with the corresponding indentatio. (before
+			// writing the next message).
+
+			// don't do anything of the above if called
+			// when message hasn't been finished yet:
+			if(!always && !had_nl_) return;
+
+			for(int i = 0; i < spread_out_; ++i) {
+				output_indent_(buffer_indent_);
+				std::fputs(style_gray_, file_);
+				std::fputs(bar_string_, file_);
+				std::fputc('\n', file_);
+				std::fputs(style_none_, file_);
+			}
+			output_indent_(buffer_indent_);
+			std::fputs(style_gray_, file_);
+			if(!buffering_) {
+				// always write the end-string when not buffering
+				// since we don't know the future.
+				std::fputs(end_string_, file_);
+			} else {
+				std::fputs(
+					indent_ >= buffer_indent_
+						? val_string_
+						: end_string_,
+					file_
+				);
+			}
+			std::fputs(style_none_, file_);
+			had_nl_ = false;
+			if(buffering_) {
+				buffer_.push_back('\0'); // the buffer isn't null-terminated.
+				std::fputs(buffer_.data(), file_);
+				buffer_.clear();
+				buffer_indent_ = indent_;
+			}
 		}
 	public:
 		logger(std::FILE *file) : file_(file) {}
 
-		void indent() { ++indent_; }
-		void dedent() { --indent_; }
+		void indent() {
+			assert(had_nl_ && "must have newline before indenting.");
+			++indent_;
+		}
+
+		void dedent() {
+			assert(had_nl_ && "must have newline before dedenting.");
+			--indent_;
+		}
+
+		void set_buffering(bool v) { buffering_ = v; }
+		bool get_buffering() { return buffering_; }
+		void set_spread_out(int v) { spread_out_ = v; }
+		int get_spread_out() const { return spread_out_; }
+
+		void flush() {
+			maybe_flush_(true);
+		}
 
 		template<typename ...Ts>
 		void println(fmt::format_string<Ts...> f, Ts ...ts) {
-			if(had_nl_) {
-				output_indent_(indent_);
-				had_nl_ = false;
-			}
-			// std::fputs("\033[31mError\33[m:", file_);
-			fmt::print(file_, f, std::forward<Ts>(ts)...);
-			std::fputc('\n', file_);
+			print(f, std::forward<Ts>(ts)...);
+			newline();
+		}
+
+		void newline() {
+			putc_('\n');
 			had_nl_ = true;
+			buffer_indent_ = indent_;
 		}
 
 		template<typename ...Ts>
 		void print(fmt::format_string<Ts...> f, Ts ...ts) {
-			if(had_nl_) {
-				output_indent_(indent_);
-				had_nl_ = false;
+			maybe_flush_();
+			if(buffering_) {
+				buffer_.reserve(buffer_.size() + fmt::formatted_size(f, std::forward<Ts>(ts)...));
+				fmt::format_to(std::back_inserter(buffer_), f, std::forward<Ts>(ts)...);
+			} else {
+				fmt::print(file_, f, std::forward<Ts>(ts)...);
 			}
-			// std::fputs("\033[31mError\33[m:", file_);
-			fmt::print(file_, f, std::forward<Ts>(ts)...);
 		}
 	};
 
-	static logger default_logger{stderr};
+	static logger default_logger { stderr };
 }
 
 static auto &clog = util::log::default_logger;
@@ -340,7 +427,7 @@ namespace res {
 				m.resources_.find(id)->second.maybe_load(m, id);
 			}
 
-			[[nodiscard]] const T &get_from(res_manager &m) const {
+			[[nodiscard]] T &get_from(res_manager &m) const {
 				return *(T*)m.resources_.find(id)->second.maybe_load(m, id);
 			}
 
@@ -357,7 +444,12 @@ namespace res {
 		}
 
 		void new_resource(res_id_type &&id, const stdfs::path &path, strv provider) {
-			clog.println("-: New resource {{{}}} @ {} : {}", id.to_string(), path, provider);
+			clog.println("New resource:");
+			clog.indent();
+			clog.println("id: {{{}}}", id.to_string());
+			clog.println("path: {}", path);
+			clog.println("provider: {}", provider);
+			clog.dedent();
 			resources_.emplace(std::move(id), res_container(id, path, providers_[provider.data()].get()));
 		}
 
@@ -431,7 +523,7 @@ namespace res {
 			auto &secondary = resources_.find(dep)->second;
 			primary.deps.insert(dep);
 			secondary.rdeps.insert(id);
-			clog.println("-: New dependency: {} on {}.", primary.to_string(), secondary.to_string());
+			clog.println("New dependency: {} on {}.", primary.to_string(), secondary.to_string());
 		}
 
 		void remove_dependency(const res_id_type &id, const res_id_type &dep) {
@@ -472,12 +564,14 @@ namespace res {
 				::util::json::assert_type(item["path"], ::util::json::value_kind::string);
 				auto path = item["path"].get_ref<const std::string &>();
 
-				new_resource(uuid.value(), path, provider);
+				new_resource(uuid.value(), path, provider); // (1)
 
 				if(item.contains("name")) {
 					::util::json::assert_type(item["name"], ::util::json::value_kind::string);
 					auto name = item["name"].get_ref<const std::string &>();
-					clog.println("  `- name: {}", name);
+					clog.indent(); // indented because it binds to (1)
+					clog.println("name: {}", name);
+					clog.dedent();
 					set_name(uuid.value(), name);
 				}
 			}
@@ -512,42 +606,47 @@ namespace res {
 			/* load the resource if it hasn't been loaded yet. will also load dependencies. */
 			void *maybe_load(res_manager &m, const res_id_type &id) {
 				if(loaded) return data;
-				clog.println("-: Trying to load {}.", to_string());
+				clog.println("Trying to load {}.", to_string());
+				clog.indent();
 				data = new std::byte[provider->get_size()];
+				clog.println("Loading...");
+				clog.indent();
+				provider->load(m, id, path, std::span<std::byte>(data, provider->get_size()));
+				clog.dedent();
 				for(const auto &dep : deps) {
-					clog.println("  `- Dependency: {}.", dep.to_string());
+					clog.println("Dependency: {}.", dep.to_string());
 					if(auto it = m.resources_.find(dep); it != m.resources_.end()) {
 						clog.indent();
 						it->second.maybe_load(m, it->first);
 						clog.dedent();
 					}
 				}
-				clog.println("  `- Loading...");
-				clog.indent();
-				provider->load(m, id, path, std::span<std::byte>(data, provider->get_size()));
-				clog.dedent();
 				loaded = true;
+				clog.dedent();
 				return data;
 			}
 
 			/* unload the resource if it hasn't been unloaded yet and no reverse dependencies are loaded. */
 			void maybe_unload(res_manager &m, const res_id_type &id) {
 				if(!loaded) return;
-				clog.println("-: Trying to unload {}.", to_string());
+				clog.println("Trying to unload {}.", to_string());
+				clog.indent();
 				for(const auto &dep : rdeps) {
 					if(auto it = m.resources_.find(dep); it != m.resources_.end()) {
 						if(it->second.loaded) {
-							clog.println("  `- Will not unload due to rev. dependencies.");
+							clog.println("Will not unload due to rev. dependencies.");
+							clog.dedent();
 							return; // do not unload, reverse dependency still loaded.
 						}
 					}
 				}
-				clog.println("  `- Unloading...");
+				clog.println("Unloading...");
 				clog.indent();
 				provider->unload(m, id, std::span<std::byte>(data, provider->get_size()));
 				clog.dedent();
 				delete data;
 				loaded = false;
+				clog.dedent();
 			}
 
 			std::string to_string() const {
@@ -612,9 +711,9 @@ namespace gfx {
 		void load_from_file(::res::res_manager &m, const ::res::res_id_type &rid, const stdfs::path &general_path) {
 			stdfs::path vs_path = general_path / "vert.glsl";
 			stdfs::path fs_path = general_path / "frag.glsl";
-			clog.println("  `- path: {}", general_path);
-			clog.println("  `- vs path: {}", vs_path);
-			clog.println("  `- fs path: {}", fs_path);
+			clog.println("path: {}", general_path);
+			clog.println("vs path: {}", vs_path);
+			clog.println("fs path: {}", fs_path);
 
 			auto vs = glCreateShader(GL_VERTEX_SHADER);
 			auto vs_content = ::util::read_file(vs_path);
@@ -697,7 +796,7 @@ namespace gfx {
 		}
 
 		void load_from_file(::res::res_manager &m, const ::res::res_id_type &rid, const stdfs::path &path) {
-			clog.println(" `- path: {}", path);
+			clog.println("path: {}", path);
 			
 			int channels;
 			uint8_t *data = stbi_load(path.c_str(), &size.x, &size.y, &channels, 4);
@@ -747,7 +846,7 @@ namespace gfx {
 		}
 
 		void load_from_file(::res::res_manager &m, const ::res::res_id_type &id, const stdfs::path &path) {
-			clog.println(" `- path: {}", path);
+			clog.println("path: {}", path);
 			if(path.extension() == ".gltf") {
 				load_from_gltf(m, id, path.c_str());
 			} else if(path.extension() == ".obj") {
@@ -841,8 +940,8 @@ namespace gfx {
 			const std::span<vertex_type> &vertices,
 			const std::span<index_type> &indices
 		) {
-			clog.println("  `- vertices: {}", vertices.size());
-			clog.println("  `- indices: {}", indices.size());
+			clog.println("vertices: {}", vertices.size());
+			clog.println("indices: {}", indices.size());
 			indexed = true;
 			this->mode = mode;
 			vertex_count = vertices.size();
@@ -862,8 +961,8 @@ namespace gfx {
 			mesh_mode mode,
 			const std::span<vertex_type> &vertices
 		) {
-			clog.println("  `- vertices: {}", vertices.size());
-			clog.println("  `- indices: none");
+			clog.println("vertices: {}", vertices.size());
+			clog.println("indices: none");
 			indexed = false;
 			this->mode = mode;
 			vertex_count = vertices.size();
@@ -885,15 +984,33 @@ namespace gfx {
 			unit_type unit;
 		};
 
-		using value_type = std::variant<float, glm::vec2, glm::vec3, glm::vec4, glm::mat4>;
-		std::unordered_map<std::string, value_type> params;
+		using value_type = std::variant<int, float, glm::vec2, glm::vec3, glm::vec4, glm::mat4>;
+
+		struct param_type {
+			value_type value;
+			bool dirty = false;
+
+			template<typename T>
+			void set(const T &t) {
+				value = t;
+				dirty = true;
+			}
+		};
+
+		std::unordered_map<std::string, param_type> params;
 		std::vector<texture_binding> textures;
 		// note: sizeof(value_type) is large
 		::res_ref<shader> shader;
 	public:
+		void set(strv name, float v) { params[name.data()].set(v); }
+		void set(strv name, const glm::vec2 &v) { params[name.data()].set(v); }
+		void set(strv name, const glm::vec3 &v) { params[name.data()].set(v); }
+		void set(strv name, const glm::vec4 &v) { params[name.data()].set(v); }
+		void set(strv name, const glm::mat4 &v) { params[name.data()].set(v); }
+
 		void unload(::res::res_manager &m, const ::res::res_id_type &id) {}
 		void load_from_file(::res::res_manager &m, const ::res::res_id_type &id, const stdfs::path &path) {
-			clog.println(" `- path: {}", path);
+			clog.println("path: {}", path);
 			auto res = ::util::json::read_file(path);
 			::util::json::assert_type(res, ::util::json::value_kind::object);
 			::util::json::read_res_name_or_uuid(res, "shader", "shader-uuid", m, shader.id);
@@ -903,23 +1020,38 @@ namespace gfx {
 				for(auto &[key, value] : res["params"].items()) {
 					::util::json::assert_type(value,
 						::util::json::value_kind::number,
-						::util::json::value_kind::array);
-					if(value.is_number()) params[key] = value.get<float>();
-					else {
-						if(value.size() == 1) params[key] = value[0].get<float>();
+						::util::json::value_kind::array,
+						::util::json::value_kind::string);
+					if(value.is_number()) {
+						params[key].value = value.get<int>();
+					} else if(value.is_string()) {
+						const auto &type = value.get_ref<const std::string&>();
+						if(type == "") params[key].value = 0;
+						else if(type == "int") params[key].value = 0;
+						else if(type == "float") params[key].value = 0.0f;
+						else if(type == "vec2") params[key].value = glm::vec2{};
+						else if(type == "vec3") params[key].value = glm::vec2{};
+						else if(type == "vec4") params[key].value = glm::vec2{};
+						else if(type == "mat4") params[key].value = glm::vec2{};
+						else {
+							::util::fail_error("Invalid material parameter type: '{}', "
+								"must be one of [int, float, vec2, vec3, vec4, mat4]", type);
+						}
+					} else {
+						if(value.size() == 1) params[key].value = value[0].get<float>();
 						else if(value.size() == 2) {
-							params[key] = glm::vec2(
+							params[key].value = glm::vec2(
 								value[0].get<float>(),
 								value[1].get<float>()
 							);
 						} else if(value.size() == 3) {
-							params[key] = glm::vec3(
+							params[key].value = glm::vec3(
 								value[0].get<float>(),
 								value[1].get<float>(),
 								value[2].get<float>()
 							);
 						} else if(value.size() == 4) {
-							params[key] = glm::vec4(
+							params[key].value = glm::vec4(
 								value[0].get<float>(),
 								value[1].get<float>(),
 								value[2].get<float>(),
@@ -953,7 +1085,7 @@ namespace gfx {
 	public:
 		void unload(::res::res_manager &m, const ::res::res_id_type &id) {}
 		void load_from_file(::res::res_manager &m, const ::res::res_id_type &id, const stdfs::path &path) {
-			clog.println(" `- path: {}", path);
+			clog.println("path: {}", path);
 			auto res = ::util::json::read_file(path);
 			::util::json::assert_type(res, ::util::json::value_kind::object);
 			::util::json::assert_contains(res, "parts");
@@ -1137,6 +1269,31 @@ namespace gfx {
 			}
 		}
 
+		void bind_material(::gfx::material &material) {
+			auto &shader = material.shader.get_from(resman);
+			bind_shader(shader);
+			for(auto &[name, param] : material.params) {
+				if(!param.dirty) continue;
+				if(std::holds_alternative<int>(param.value)) {
+					shader.set_uniform(name.c_str(), std::get<int>(param.value));
+				} else if(std::holds_alternative<float>(param.value)) {
+					shader.set_uniform(name.c_str(), std::get<float>(param.value));
+				} else if(std::holds_alternative<glm::vec2>(param.value)) {
+					shader.set_uniform(name.c_str(), std::get<glm::vec2>(param.value));
+				} else if(std::holds_alternative<glm::vec3>(param.value)) {
+					shader.set_uniform(name.c_str(), std::get<glm::vec3>(param.value));
+				} else if(std::holds_alternative<glm::vec4>(param.value)) {
+					shader.set_uniform(name.c_str(), std::get<glm::vec4>(param.value));
+				} else if(std::holds_alternative<glm::mat4>(param.value)) {
+					shader.set_uniform(name.c_str(), std::get<glm::mat4>(param.value));
+				} else assert(false && "bad material param value variant type");
+				param.dirty = false;
+			}
+			for(const auto &texture : material.textures) {
+				bind_texture(texture.unit, texture.texture.get_from(resman));
+			}
+		}
+
 		void bind_shader(const ::gfx::shader &shader) {
 			bind_program_(shader.id);
 		}
@@ -1185,6 +1342,9 @@ struct transform {
 };
 
 int main(int argc, char *argv[]) {
+	clog.set_spread_out(0);
+	std::atexit([](){ clog.flush(); });
+
 	gfx::backend_glfw::init();
 	gfx::window window;
 
@@ -1210,7 +1370,6 @@ int main(int argc, char *argv[]) {
 
 	gfx::renderer rend{resman};
 	rend.init();
-	rend.bind_shader(default_shader.get_from(resman));
 	
 	transform trans /* :o */ = {
 		.pos = glm::vec3(0.0f, 0.0f, 0.0f),
@@ -1230,17 +1389,6 @@ int main(int argc, char *argv[]) {
 
 	window.get_resize_hook().add([&](glm::ivec2 size) {
 		cam.aspect = window.aspect();
-	});
-
-	struct { glm::vec3 dir; glm::vec4 col; } sun = {
-		.dir = glm::normalize(glm::vec3(1.0f, 2.0f, -0.6f)),
-		.col = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f)
-	};
-
-	default_shader.context_from(resman, [&](const gfx::shader &shader) {
-		shader.set_uniform("uSunDir", sun.dir);
-		shader.set_uniform("uSunCol", sun.col);
-		shader.set_uniform("uTexture", 0);
 	});
 
 	float last_time = gfx::backend_glfw::get_time();
@@ -1280,14 +1428,13 @@ int main(int argc, char *argv[]) {
 			right_left_key_was_down = false;
 		}
 
-		default_shader.context_from(resman, [&](const gfx::shader &shader) {
-			shader.set_uniform("uTransform", cam.matrix() * trans.matrix());
-		});
+		default_material.get_from(resman).set("uTransform", cam.matrix() * trans.matrix());
 
 		auto current_mesh = resman.get_resource<gfx::mesh>(mesh_names[current_mesh_index]);
 
 		rend.pre_render();
 		rend.viewport(window.size());
+		rend.bind_material(default_material.get_from(resman));
 		rend.render(current_mesh.get_from(resman));
 		rend.post_render();
 
@@ -1300,6 +1447,5 @@ int main(int argc, char *argv[]) {
 	window.deinit();
 	
 	gfx::backend_glfw::deinit();
-
 	return 0;
 }
