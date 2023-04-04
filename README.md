@@ -2,7 +2,9 @@
 
 Tiny experiment with modern OpenGL and C++20.
 
-![rotated cube with normals on black background](data/screenshot.png)
+![house with flushed emoji texture](data/screenshot.png)
+
+> Yes, that is a house with a :flushed: texture.
 
 > Controls: LMB drag to rotate camera. Left/Right to switch meshes.
 
@@ -13,7 +15,8 @@ Tiny experiment with modern OpenGL and C++20.
 > [glfw3](https://glfw.org),
 > [ninja](https://ninja-build.org),
 > [python ≥3.6](https://python.org),
-> [clang ≥15](https://clang.llvm.org)
+> [clang ≥15](https://clang.llvm.org),
+> [fmtlib](https://fmt.dev)
 
 The project uses ninja with a custom python generator script as it's build system. The build configuration is stored in [`build.cfg`](/build.cfg) and is read by [`gen.py`](/gen.py) to generate the `build.ninja` file (note: it's in [`.gitignore`](/.gitignore)).
 
@@ -71,7 +74,6 @@ build/main
 
 > Note: in order of importance.
 
-- Add texture support.
 - Add gltf loading support with cgltf.
 - Add webgpu backend and backend system.
 - Add Dear ImGui or something similar.

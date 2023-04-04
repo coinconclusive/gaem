@@ -7,15 +7,18 @@
 #include <nlohmann_json.hpp>
 #include <tiny_obj_loader.h>
 #include <cgltf.h>
+#include <stb_image.h>
 #include <uuid.h>
+#include <fmt/core.h>
+#include <fmt/std.h>
+#include <fmt/ranges.h>
 
 #include <cstdio>
 #include <string_view>
 #include <string>
-#include <fstream>
-#include <iostream>
-#include <sstream>
 #include <filesystem>
+#include <sstream>
+#include <fstream>
 #include <vector>
 #include <span>
 #include <variant>
@@ -29,8 +32,13 @@ namespace nmann = nlohmann;
 using namespace std::literals;
 // namespace stdch = std::chrono;
 
-namespace res { class res_id_type; }
-std::ostream &operator<<(std::ostream &os, const ::res::res_id_type &id);
+/* null-terminated string view. (alias) */
+using strv = std::string_view;
+
+namespace res {
+	class res_id_type;
+	std::ostream &operator<<(std::ostream &os, const res_id_type &id);
+}
 
 namespace util {
 	template<typename T>
@@ -66,7 +74,6 @@ namespace util {
 		}
 	};
 
-
 	template<typename A, typename B>
 	struct combined { const A &a; const B &b; };
 
@@ -75,12 +82,143 @@ namespace util {
 		os << p.a << p.b;
 		return os;
 	}
+}
 
+namespace util::log {
+	class logger {
+		std::FILE *file_;
+		bool had_nl_ = true;
+		int indent_ = 0;
+		int spread_out_ = 0;
+		bool buffering_ = true;
+		int buffer_indent_ = 0;
+		std::vector<char> buffer_;
+
+		static constexpr const char *style_gray_ = "\033[90m";
+		static constexpr const char *style_none_ = "\033[m";
+		static constexpr const char *bar_string_ = "│ " ; // "| ";
+		static constexpr const char *val_string_ = "├╴ "; // "|- ";
+		static constexpr const char *end_string_ = "╰╴ "; // "`- ";
+
+		void puts_(strv s) {
+			if(buffering_)
+				buffer_.insert(buffer_.end(), s.begin(), s.end());
+			else std::fputs(s.data(), file_);
+		}
+
+		void putc_(char c) {
+			if(buffering_) buffer_.push_back(c);
+			else std::fputc(c, file_);
+		}
+
+		void output_indent_(int indent) {
+			std::fputs(style_gray_, file_);
+			for(int i = 0; i < indent; ++i)
+				std::fputs(bar_string_, file_);
+			std::fputs(style_none_, file_);
+		}
+
+		void maybe_flush_(bool always = false) {
+			// when not buffering, this function is called
+			// to update indentation (before writing the
+			// indented message).
+
+			// when buffering, this functions is called
+			// to output the stored buffer (and clear it)
+			// with the corresponding indentatio. (before
+			// writing the next message).
+
+			// don't do anything of the above if called
+			// when message hasn't been finished yet:
+			if(!always && !had_nl_) return;
+
+			for(int i = 0; i < spread_out_; ++i) {
+				output_indent_(buffer_indent_);
+				std::fputs(style_gray_, file_);
+				std::fputs(bar_string_, file_);
+				std::fputc('\n', file_);
+				std::fputs(style_none_, file_);
+			}
+			output_indent_(buffer_indent_);
+			std::fputs(style_gray_, file_);
+			if(!buffering_) {
+				// always write the end-string when not buffering
+				// since we don't know the future.
+				std::fputs(end_string_, file_);
+			} else {
+				std::fputs(
+					indent_ >= buffer_indent_
+						? val_string_
+						: end_string_,
+					file_
+				);
+			}
+			std::fputs(style_none_, file_);
+			had_nl_ = false;
+			if(buffering_) {
+				buffer_.push_back('\0'); // the buffer isn't null-terminated.
+				std::fputs(buffer_.data(), file_);
+				buffer_.clear();
+				buffer_indent_ = indent_;
+			}
+		}
+	public:
+		logger(std::FILE *file) : file_(file) {}
+
+		void indent() {
+			assert(had_nl_ && "must have newline before indenting.");
+			++indent_;
+		}
+
+		void dedent() {
+			assert(had_nl_ && "must have newline before dedenting.");
+			--indent_;
+		}
+
+		void set_buffering(bool v) { buffering_ = v; }
+		bool get_buffering() { return buffering_; }
+		void set_spread_out(int v) { spread_out_ = v; }
+		int get_spread_out() const { return spread_out_; }
+
+		void flush() {
+			maybe_flush_(true);
+		}
+
+		template<typename ...Ts>
+		void println(fmt::format_string<Ts...> f, Ts ...ts) {
+			print(f, std::forward<Ts>(ts)...);
+			newline();
+		}
+
+		void newline() {
+			putc_('\n');
+			had_nl_ = true;
+			buffer_indent_ = indent_;
+		}
+
+		template<typename ...Ts>
+		void print(fmt::format_string<Ts...> f, Ts ...ts) {
+			maybe_flush_();
+			if(buffering_) {
+				buffer_.reserve(buffer_.size() + fmt::formatted_size(f, std::forward<Ts>(ts)...));
+				fmt::format_to(std::back_inserter(buffer_), f, std::forward<Ts>(ts)...);
+			} else {
+				fmt::print(file_, f, std::forward<Ts>(ts)...);
+			}
+		}
+	};
+
+	static logger default_logger { stderr };
+}
+
+static auto &clog = util::log::default_logger;
+
+namespace util {
 	template<typename ...Ts>
-	void print_error(Ts ...ts) {
-		std::cerr << "\033[31mError\33[m: ";
-		(std::cerr << ... << std::forward<Ts>(ts));
-		std::cerr << std::endl;
+	void print_error(fmt::format_string<Ts...> f, Ts ...ts) {
+		std::fputs("\033[31mError\33[m:", stderr);
+		fmt::print(stderr, f, std::forward<Ts>(ts)...);
+		std::fputc('\n', stderr);
 	}
 
 	void fail() {
@@ -88,8 +226,8 @@ namespace util {
 	}
 
 	template<typename ...Ts>
-	void fail_error(Ts ...ts) {
-		print_error(std::forward<Ts>(ts)...);
+	void fail_error(fmt::format_string<Ts...> f, Ts ...ts) {
+		print_error(f, std::forward<Ts>(ts)...);
 		fail();
 	}
 
@@ -110,77 +248,77 @@ namespace util {
 		return "unknown";
 	};
 
-	nmann::json read_json_file(const stdfs::path &path) {
-		std::ifstream inp(path);
-		inp.exceptions(std::ios_base::badbit);
-		return nmann::json::parse(inp);
-	}
-
-	enum class json_value_type { null, object, array, string, number, boolean };
-
-	json_value_type nmann_type_to_json_type(nmann::json::value_t v) {
-		switch(v) {
-		case nlohmann::detail::value_t::null: return json_value_type::null;
-		case nlohmann::detail::value_t::object: return json_value_type::object;
-		case nlohmann::detail::value_t::array: return json_value_type::array;
-		case nlohmann::detail::value_t::string: return json_value_type::string;
-		case nlohmann::detail::value_t::boolean:  return json_value_type::boolean;
-		case nlohmann::detail::value_t::number_integer:
-		case nlohmann::detail::value_t::number_unsigned:
-		case nlohmann::detail::value_t::number_float:
-		case nlohmann::detail::value_t::binary:
-		case nlohmann::detail::value_t::discarded:
-			return json_value_type::number;
-		}
-	}
-
-	const char *json_typename(json_value_type type) {
-		switch(type) {
-		case json_value_type::null: return "null";
-		case json_value_type::object: return "object";
-		case json_value_type::array: return "array";
-		case json_value_type::string: return "string";
-		case json_value_type::number: return "number";
-		case json_value_type::boolean: return "boolean";
-		}
-	}
-
-	template<std::convertible_to<json_value_type> ...Ts>
-	bool json_check_type(const nmann::json &j, json_value_type first, Ts &&...rest) {
-		auto jtype = nmann_type_to_json_type(j.type());
-		std::array<json_value_type, 1 + sizeof...(Ts)> types { first, rest... };
-		for(auto t : types) {
-			if(jtype == t) return true;
-		}
-		print_error(
-			"expected one of ",
-			json_typename(first),
-			combined<const char*, const char*>{ ", ", json_typename(rest) }...,
-			", but got ",
-			json_typename(jtype)
-		);
-		return false;
-	}
-
-	template<std::convertible_to<json_value_type> ...Ts>
-	void json_assert_type(const nmann::json &j, json_value_type first, Ts &&...rest) {
-		if(!json_check_type(j, first, std::forward<Ts>(rest)...)) fail();
-	}
-
-	void json_assert_contains(const nmann::json &j, const nmann::json::object_t::key_type &key) {
-		if(!j.contains(key)) fail_error("No required key: ", key);
-	}
-
-	void json_assert_contains(const nmann::json &j, size_t index) {
-		if(index >= j.size()) fail_error("Array too small: ", index, " >= ", j.size());
-	}
-
 	auto read_file(const stdfs::path &path) -> std::vector<char> {
 		std::vector<char> v(stdfs::file_size(path));
 		auto stream = std::ifstream(path);
 		stream.exceptions(std::ios_base::badbit);
 		stream.read(v.data(), v.size());
 		return v;
+	}
+}
+
+namespace util::json {
+	nmann::json read_file(const stdfs::path &path) {
+		std::ifstream inp(path);
+		inp.exceptions(std::ios_base::badbit);
+		return nmann::json::parse(inp);
+	}
+
+	enum class value_kind { null, object, array, string, number, boolean };
+
+	value_kind nmann_type_to_value_kind(nmann::json::value_t v) {
+		switch(v) {
+		case nmann::detail::value_t::null: return value_kind::null;
+		case nmann::detail::value_t::object: return value_kind::object;
+		case nmann::detail::value_t::array: return value_kind::array;
+		case nmann::detail::value_t::string: return value_kind::string;
+		case nmann::detail::value_t::boolean:  return value_kind::boolean;
+		case nmann::detail::value_t::number_integer:
+		case nmann::detail::value_t::number_unsigned:
+		case nmann::detail::value_t::number_float:
+		case nmann::detail::value_t::binary:
+		case nmann::detail::value_t::discarded:
+			return value_kind::number;
+		}
+	}
+
+	const char *type_name(value_kind type) {
+		switch(type) {
+		case value_kind::null: return "null";
+		case value_kind::object: return "object";
+		case value_kind::array: return "array";
+		case value_kind::string: return "string";
+		case value_kind::number: return "number";
+		case value_kind::boolean: return "boolean";
+		}
+	}
+
+	template<std::convertible_to<value_kind> ...Ts>
+	bool check_type(const nmann::json &j, value_kind first, Ts &&...rest) {
+		auto jtype = nmann_type_to_value_kind(j.type());
+		std::array<value_kind, 1 + sizeof...(Ts)> types { first, rest... };
+		for(auto t : types) {
+			if(jtype == t) return true;
+		}
+		print_error(
+			"Expected one of {}, but got {} instead.",
+			std::make_tuple(type_name(first), type_name(rest)...),
+			type_name(jtype)
+		);
+		return false;
+	}
+
+	template<std::convertible_to<value_kind> ...Ts>
+	void assert_type(const nmann::json &j, value_kind first, Ts &&...rest) {
+		if(!check_type(j, first, std::forward<Ts>(rest)...)) fail();
+	}
+
+	void assert_contains(const nmann::json &j, const nmann::json::object_t::key_type &key) {
+		if(!j.contains(key)) fail_error("No required key: '{}'.", key);
+	}
+
+	void assert_contains(const nmann::json &j, size_t index) {
+		if(index >= j.size()) fail_error("Array too small: {} >= {}.", index, j.size());
 	}
 }
 
@@ -289,7 +427,7 @@ namespace res {
 				m.resources_.find(id)->second.maybe_load(m, id);
 			}
 
-			[[nodiscard]] const T &get_from(res_manager &m) const {
+			[[nodiscard]] T &get_from(res_manager &m) const {
 				return *(T*)m.resources_.find(id)->second.maybe_load(m, id);
 			}
 
@@ -301,23 +439,28 @@ namespace res {
 		res_id_type generate_new_id() { return generator_(); }
 
 
-		void new_resource(const res_id_type &id, const stdfs::path &path, std::string_view provider) {
+		void new_resource(const res_id_type &id, const stdfs::path &path, strv provider) {
 			resources_.emplace(id, res_container(id, path, providers_[provider.data()].get()));
 		}
 
-		void new_resource(res_id_type &&id, const stdfs::path &path, std::string_view provider) {
-			std::cerr << "[info] new resource {" << id << "} @" << path << " : " << provider << std::endl;
+		void new_resource(res_id_type &&id, const stdfs::path &path, strv provider) {
+			clog.println("New resource:");
+			clog.indent();
+			clog.println("id: {{{}}}", id.to_string());
+			clog.println("path: {}", path);
+			clog.println("provider: {}", provider);
+			clog.dedent();
 			resources_.emplace(std::move(id), res_container(id, path, providers_[provider.data()].get()));
 		}
 
-		res_id_type new_resource(const stdfs::path &path, std::string_view provider) {
+		res_id_type new_resource(const stdfs::path &path, strv provider) {
 			res_id_type id = generate_new_id();
 			new_resource(id, path, provider);
 			return id;
 		}
 
 		template<typename T>
-		ref<T> new_resource(const stdfs::path &path, std::string_view provider) {
+		ref<T> new_resource(const stdfs::path &path, strv provider) {
 			return ref<T>(new_resource(path, provider));
 		}
 
@@ -339,10 +482,23 @@ namespace res {
 		ref<T> get_resource(res_id_type &&id) { return ref<T>(std::move(id)); }
 
 		template<like_resource_type T>
-		ref<T> get_resource(std::string_view name) {
+		ref<T> get_resource(strv name) {
 			if(!names_.contains(name.data()))
 				throw std::runtime_error("no such resource: '"s + name.data() + "'");
 			return get_resource<T>(names_[name.data()]);
+		}
+
+		res_id_type get_id_by_name(strv name) const {
+			if(!names_.contains(name.data()))
+				throw std::runtime_error("no such resource: '"s + name.data() + "'");
+			return names_.find(name.data())->second;
+		}
+
+		void set_name(const res_id_type &id, strv name) {
+			if(!resources_.contains(id))
+				throw std::runtime_error("no such resource: '"s + id.to_string() + "'");
+			names_.emplace(name, id);
+			resources_.find(id)->second.name = name;
 		}
 
 		void delete_all() {
@@ -361,10 +517,13 @@ namespace res {
 		void add_dependency(const res_id_type &id, const res_id_type &dep) {
 			if(!resources_.contains(id))
 				throw std::runtime_error("no such resource: '"s + id.to_string() + "'");
-			resources_.find(id)->second.deps.insert(dep);
 			if(!resources_.contains(dep))
 				throw std::runtime_error("no such resource: '"s + dep.to_string() + "'");
-			resources_.find(dep)->second.rdeps.insert(id);
+			auto &primary = resources_.find(id)->second;
+			auto &secondary = resources_.find(dep)->second;
+			primary.deps.insert(dep);
+			secondary.rdeps.insert(id);
+			clog.println("New dependency: {} on {}.", primary.to_string(), secondary.to_string());
 		}
 
 		void remove_dependency(const res_id_type &id, const res_id_type &dep) {
@@ -377,41 +536,43 @@ namespace res {
 		}
 
 		template<typename T, typename Provider = res_provider<T>, typename ...Args>
-		void register_provider(std::string_view name, Args &&...args) {
+		void register_provider(strv name, Args &&...args) {
 			providers_[name.data()] = std::unique_ptr<res_provider_base>(new Provider(args...));
 		}
 
-		void unregister_provider(std::string_view name) { providers_.erase(name.data()); }
+		void unregister_provider(strv name) { providers_.erase(name.data()); }
 
 		void load_from_file(const stdfs::path &path) {
-			auto res = ::util::read_json_file(path);
-			::util::json_assert_type(res, ::util::json_value_type::object);
-			::util::json_assert_contains(res, "resources");
-			::util::json_assert_type(res["resources"], ::util::json_value_type::array);
+			auto res = ::util::json::read_file(path);
+			::util::json::assert_type(res, ::util::json::value_kind::object);
+			::util::json::assert_contains(res, "resources");
+			::util::json::assert_type(res["resources"], ::util::json::value_kind::array);
 			for(const auto &item : res["resources"]) {
-				::util::json_assert_type(item, ::util::json_value_type::object);
-				::util::json_assert_contains(item, "provider");
-				::util::json_assert_type(item["provider"], ::util::json_value_type::string);
+				::util::json::assert_type(item, ::util::json::value_kind::object);
+				::util::json::assert_contains(item, "provider");
+				::util::json::assert_type(item["provider"], ::util::json::value_kind::string);
 				auto provider = item["provider"].get_ref<const std::string &>();
 				if(!providers_.contains(provider))
-					::util::fail_error("Unknown provider: ", item["provider"]);
+					::util::fail_error("Unknown provider: '{}'.", item["provider"]);
 				
-				::util::json_assert_contains(item, "uuid");
-				::util::json_assert_type(item["uuid"], ::util::json_value_type::string);
+				::util::json::assert_contains(item, "uuid");
+				::util::json::assert_type(item["uuid"], ::util::json::value_kind::string);
 				auto uuid = uuids::uuid::from_string(item["uuid"].get_ref<const std::string &>());
-				if(!uuid.has_value()) ::util::fail_error("Invalid UUID: ", res["shader"]);
+				if(!uuid.has_value()) ::util::fail_error("Invalid UUID: '{}'.", res["shader"]);
 
-				::util::json_assert_contains(item, "path");
-				::util::json_assert_type(item["path"], ::util::json_value_type::string);
+				::util::json::assert_contains(item, "path");
+				::util::json::assert_type(item["path"], ::util::json::value_kind::string);
 				auto path = item["path"].get_ref<const std::string &>();
 
-				new_resource(uuid.value(), path, provider);
+				new_resource(uuid.value(), path, provider); // (1)
 
 				if(item.contains("name")) {
-					::util::json_assert_type(item["name"], ::util::json_value_type::string);
+					::util::json::assert_type(item["name"], ::util::json::value_kind::string);
 					auto name = item["name"].get_ref<const std::string &>();
-					std::cerr << "  `- name: " << name << std::endl;
-					names_.emplace(name, uuid.value());
+					clog.indent(); // indented because it binds to (1)
+					clog.println("name: {}", name);
+					clog.dedent();
+					set_name(uuid.value(), name);
 				}
 			}
 		}
@@ -424,6 +585,7 @@ namespace res {
 		struct res_container {
 			res_id_type id; /* resource id. */
 			stdfs::path path; /* path to resource. */
+			std::optional<std::string> name; /* resource name. */
 			res_provider_base *provider; /* resource provider. */
 			using set_cmp_ = decltype([](const res_id_type &a, const res_id_type &b) -> bool {
 				return res_id_type::hash{}(a) < res_id_type::hash{}(b);
@@ -443,35 +605,58 @@ namespace res {
 
 			/* load the resource if it hasn't been loaded yet. will also load dependencies. */
 			void *maybe_load(res_manager &m, const res_id_type &id) {
-				if(!loaded) {
-					data = new std::byte[provider->get_size()];
-					for(const auto &dep : deps) {
-						if(auto it = m.resources_.find(dep); it != m.resources_.end()) {
-							it->second.maybe_load(m, it->first);
-						}
+				if(loaded) return data;
+				clog.println("Trying to load {}.", to_string());
+				clog.indent();
+				data = new std::byte[provider->get_size()];
+				clog.println("Loading...");
+				clog.indent();
+				provider->load(m, id, path, std::span<std::byte>(data, provider->get_size()));
+				clog.dedent();
+				for(const auto &dep : deps) {
+					clog.println("Dependency: {}.", dep.to_string());
+					if(auto it = m.resources_.find(dep); it != m.resources_.end()) {
+						clog.indent();
+						it->second.maybe_load(m, it->first);
+						clog.dedent();
 					}
-					provider->load(m, id, path, std::span<std::byte>(data, provider->get_size()));
-					loaded = true;
 				}
+				loaded = true;
+				clog.dedent();
 				return data;
 			}
 
 			/* unload the resource if it hasn't been unloaded yet and no reverse dependencies are loaded. */
 			void maybe_unload(res_manager &m, const res_id_type &id) {
 				if(!loaded) return;
+				clog.println("Trying to unload {}.", to_string());
+				clog.indent();
 				for(const auto &dep : rdeps) {
 					if(auto it = m.resources_.find(dep); it != m.resources_.end()) {
-						if(it->second.loaded) return; // do not unload, reverse dependency still loaded.
+						if(it->second.loaded) {
+							clog.println("Will not unload due to rev. dependencies.");
+							clog.dedent();
+							return; // do not unload, reverse dependency still loaded.
+						}
 					}
 				}
+				clog.println("Unloading...");
+				clog.indent();
 				provider->unload(m, id, std::span<std::byte>(data, provider->get_size()));
+				clog.dedent();
 				delete data;
 				loaded = false;
+				clog.dedent();
+			}
+
+			std::string to_string() const {
+				if(name.has_value()) return "'" + name.value() + "'";
+				return "{" + id.to_string() + "}";
 			}
 
 			~res_container() {
 				if(loaded) {
-					::util::print_error("resource leak: ", id);
+					::util::print_error("Resource leak: {}.", to_string());
 				}
 			}
 		};
@@ -487,6 +672,31 @@ namespace res {
 template<typename T>
 using res_ref = res::res_manager::ref<T>;
 
+namespace util::json {
+	/** load either name field (and convert to uuid by using a resource manager)
+	  * or load a uuid field from json object. */
+	void read_res_name_or_uuid(
+		const nmann::json &j,
+		strv name_field, strv uuid_field,
+		::res::res_manager &m,
+		::res::res_id_type &id
+	) {
+		if(j.contains(name_field)) { // name field present.
+			::util::json::assert_type(j[name_field], ::util::json::value_kind::string);
+			auto name = j[name_field].get_ref<const std::string &>();
+			id = m.get_id_by_name(name);
+		} else if(j.contains(uuid_field)) { // uuid field present.
+			::util::json::assert_type(j[uuid_field], ::util::json::value_kind::string);
+			auto uuid = uuids::uuid::from_string(j[uuid_field].get_ref<const std::string &>());
+			if(!uuid.has_value()) // must be a valid uuid.
+				::util::fail_error("Invalid UUID: '{}'.", j[uuid_field]);
+			id = std::move(uuid).value();
+		} else { // no field present, fail.
+			::util::fail_error("No '{}' or '{}' fields.", name_field, uuid_field);
+		}
+	}
+}
+
 namespace gfx {
 	class renderer;
 	
@@ -501,13 +711,9 @@ namespace gfx {
 		void load_from_file(::res::res_manager &m, const ::res::res_id_type &rid, const stdfs::path &general_path) {
 			stdfs::path vs_path = general_path / "vert.glsl";
 			stdfs::path fs_path = general_path / "frag.glsl";
-			std::cerr << "  .--------------\n";
-			std::cerr << "-: loading shader\n";
-			std::cerr << "  `--------------\n";
-			std::cerr << "     path: " << general_path << "\n";
-			std::cerr << "  vs path: " << vs_path << "\n";
-			std::cerr << "  fs path: " << fs_path << "\n";
-			std::cerr << std::endl;
+			clog.println("path: {}", general_path);
+			clog.println("vs path: {}", vs_path);
+			clog.println("fs path: {}", fs_path);
 
 			auto vs = glCreateShader(GL_VERTEX_SHADER);
 			auto vs_content = ::util::read_file(vs_path);
@@ -521,7 +727,7 @@ namespace gfx {
 			if(!success) {
 				GLchar message[1024];
 				glGetShaderInfoLog(vs, 1024, nullptr, message);
-				::util::fail_error("failed to compile vertex shader:\n", message);
+				::util::fail_error("Failed to compile vertex shader:\n{}", message);
 			}
 
 			auto fs = glCreateShader(GL_FRAGMENT_SHADER);
@@ -535,7 +741,7 @@ namespace gfx {
 			if(!success) {
 				GLchar message[1024];
 				glGetShaderInfoLog(fs, 1024, nullptr, message);
-				::util::fail_error("failed to compile fragment shader:\n", message);
+				::util::fail_error("Failed to compile fragment shader:\n{}", message);
 			}
 
 			id = glCreateProgram();
@@ -547,8 +753,16 @@ namespace gfx {
 				GLsizei log_length = 0;
 				GLchar message[1024];
 				glGetProgramInfoLog(id, 1024, &log_length, message);
-				::util::fail_error("failed to link shader program", message);
+				::util::fail_error("Failed to link shader program:\n{}", message);
 			}
+		}
+
+		void set_uniform(const char *name, int v) const {
+			glProgramUniform1i(id, glGetUniformLocation(id, name), v);
+		}
+
+		void set_uniform(const char *name, float v) const {
+			glProgramUniform1f(id, glGetUniformLocation(id, name), v);
 		}
 
 		void set_uniform(const char *name, glm::vec2 v) const {
@@ -570,6 +784,34 @@ namespace gfx {
 			glProgramUniformMatrix4fv(id, glGetUniformLocation(id, name),
 				1, GL_FALSE, glm::value_ptr(v));
 		}
+	};
+
+	class texture {
+		friend ::gfx::renderer;
+		GLuint id;
+		glm::ivec2 size;
+	public:
+		void unload(::res::res_manager &m, const ::res::res_id_type &rid) {
+			glDeleteTextures(1, &id);
+		}
+
+		void load_from_file(::res::res_manager &m, const ::res::res_id_type &rid, const stdfs::path &path) {
+			clog.println("path: {}", path);
+			
+			int channels;
+			uint8_t *data = stbi_load(path.c_str(), &size.x, &size.y, &channels, 4);
+			glCreateTextures(GL_TEXTURE_2D, 1, &id);
+			glTextureParameteri(id, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			glTextureParameteri(id, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			glTextureParameteri(id, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			glTextureParameteri(id, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+			glTextureStorage2D(id, 1, GL_RGBA8, size.x, size.y);
+			glTextureSubImage2D(id, 0, 0, 0, size.x, size.y, GL_RGBA, GL_UNSIGNED_BYTE, data);
+			stbi_image_free(data);
+		}
+
+		glm::ivec2 get_size() const { return size; }
 	};
 
 	enum class mesh_mode {
@@ -604,16 +846,13 @@ namespace gfx {
 		}
 
 		void load_from_file(::res::res_manager &m, const ::res::res_id_type &id, const stdfs::path &path) {
-			std::cerr << "  .------------\n";
-			std::cerr << "-: loading mesh\n";
-			std::cerr << "  `------------\n";
-			std::cerr << "     path: " << path << "\n";
+			clog.println("path: {}", path);
 			if(path.extension() == ".gltf") {
 				load_from_gltf(m, id, path.c_str());
 			} else if(path.extension() == ".obj") {
 				load_from_obj(m, id, path.c_str());
 			} else {
-				::util::fail_error("unkonwn file extension: ", path.extension());
+				::util::fail_error("Unknown file extension: {}", path.extension());
 			}
 		}
 
@@ -622,7 +861,7 @@ namespace gfx {
 			cgltf_data *data = NULL;
 			cgltf_result result = cgltf_parse_file(&options, path, &data);
 			if(result != cgltf_result_success) {
-				::util::fail_error("failed to load gltf mesh: ", ::util::cgltf_result_string(result));
+				::util::fail_error("Failed to load gltf mesh: {}", ::util::cgltf_result_string(result));
 			}
 			// for(size_t i = 0; i < data->meshes_count; ++i) {
 			// 	data->meshes[i].primitives[0].material;
@@ -637,7 +876,7 @@ namespace gfx {
 			std::string warn, err;
 
 			if(!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path)) {
-				::util::fail_error(warn + err);
+				::util::fail_error("Failed to load .obj file:\n{}", warn + err);
 			}
 
 			std::unordered_map<vertex_type, index_type, decltype([](const vertex_type &v) {
@@ -701,9 +940,8 @@ namespace gfx {
 			const std::span<vertex_type> &vertices,
 			const std::span<index_type> &indices
 		) {
-			std::cerr << " vertices: " << vertices.size() << "\n";
-			std::cerr << "  indices: " << indices.size() << "\n";
-			std::cerr << std::endl;
+			clog.println("vertices: {}", vertices.size());
+			clog.println("indices: {}", indices.size());
 			indexed = true;
 			this->mode = mode;
 			vertex_count = vertices.size();
@@ -723,9 +961,8 @@ namespace gfx {
 			mesh_mode mode,
 			const std::span<vertex_type> &vertices
 		) {
-			std::cerr << " vertices: " << vertices.size() << "\n";
-			std::cerr << "  indices: none" << "\n";
-			std::cerr << std::endl;
+			clog.println("vertices: {}", vertices.size());
+			clog.println("indices: none");
 			indexed = false;
 			this->mode = mode;
 			vertex_count = vertices.size();
@@ -740,66 +977,103 @@ namespace gfx {
 
 	class material {
 		friend ::gfx::renderer;
-		using value_type = std::variant<float, glm::vec2, glm::vec3, glm::vec4, glm::mat4>;
-		std::unordered_map<std::string, value_type> params;
+
+		struct texture_binding {
+			using unit_type = GLuint;
+			::res_ref<texture> texture;
+			unit_type unit;
+		};
+
+		using value_type = std::variant<int, float, glm::vec2, glm::vec3, glm::vec4, glm::mat4>;
+
+		struct param_type {
+			value_type value;
+			bool dirty = true;
+
+			template<typename T>
+			void set(const T &t) {
+				value = t;
+				dirty = true;
+			}
+		};
+
+		std::unordered_map<std::string, param_type> params;
+		std::vector<texture_binding> textures;
 		// note: sizeof(value_type) is large
 		::res_ref<shader> shader;
 	public:
+		void set(strv name, float v) { params[name.data()].set(v); }
+		void set(strv name, const glm::vec2 &v) { params[name.data()].set(v); }
+		void set(strv name, const glm::vec3 &v) { params[name.data()].set(v); }
+		void set(strv name, const glm::vec4 &v) { params[name.data()].set(v); }
+		void set(strv name, const glm::mat4 &v) { params[name.data()].set(v); }
+
 		void unload(::res::res_manager &m, const ::res::res_id_type &id) {}
 		void load_from_file(::res::res_manager &m, const ::res::res_id_type &id, const stdfs::path &path) {
-			std::cerr << "  .----------------\n";
-			std::cerr << "-: loading material\n";
-			std::cerr << "  `----------------\n";
-			std::cerr << "  path: " << path << "\n";
-			std::cerr << std::endl;
-			auto res = ::util::read_json_file(path);
-			::util::json_assert_type(res, ::util::json_value_type::object);
-			if(res.contains("shader")) {
-				::util::json_assert_type(res["shader"], ::util::json_value_type::string);
-				auto shader_name = res["shader"].get_ref<const std::string &>();
-				shader.id = std::move(m.get_resource<::gfx::shader>(shader_name).id);
-			} else if(res.contains("shader-uuid")) {
-				::util::json_assert_type(res["shader-uuid"], ::util::json_value_type::string);
-				auto shader_uuid = uuids::uuid::from_string(res["shader-uuid"].get_ref<const std::string &>());
-				if(!shader_uuid.has_value()) {
-					::util::fail_error("Invalid UUID: ", res["shader-uuid"]);
-				}
-				shader.id = std::move(shader_uuid).value();
-			} else {
-				::util::fail_error("no shader or shader-uuid fields.");
-			}
+			clog.println("path: {}", path);
+			auto res = ::util::json::read_file(path);
+			::util::json::assert_type(res, ::util::json::value_kind::object);
+			::util::json::read_res_name_or_uuid(res, "shader", "shader-uuid", m, shader.id);
 			m.add_dependency(id, shader.id);
 			if(res.contains("params")) {
-				::util::json_assert_type(res["params"], ::util::json_value_type::object);
+				::util::json::assert_type(res["params"], ::util::json::value_kind::object);
 				for(auto &[key, value] : res["params"].items()) {
-					::util::json_assert_type(value,
-						::util::json_value_type::number,
-						::util::json_value_type::array);
-					if(value.is_number()) params[key] = value.get<float>();
-					else {
-						if(value.size() == 1) params[key] = value[0].get<float>();
+					::util::json::assert_type(value,
+						::util::json::value_kind::number,
+						::util::json::value_kind::array,
+						::util::json::value_kind::string);
+					if(value.is_number()) {
+						params[key].value = value.get<int>();
+					} else if(value.is_string()) {
+						const auto &type = value.get_ref<const std::string&>();
+						if(type == "") params[key].value = 0;
+						else if(type == "int") params[key].value = 0;
+						else if(type == "float") params[key].value = 0.0f;
+						else if(type == "vec2") params[key].value = glm::vec2{};
+						else if(type == "vec3") params[key].value = glm::vec2{};
+						else if(type == "vec4") params[key].value = glm::vec2{};
+						else if(type == "mat4") params[key].value = glm::vec2{};
+						else {
+							::util::fail_error("Invalid material parameter type: '{}', "
+								"must be one of [int, float, vec2, vec3, vec4, mat4]", type);
+						}
+					} else {
+						if(value.size() == 1) params[key].value = value[0].get<float>();
 						else if(value.size() == 2) {
-							params[key] = glm::vec2(
+							params[key].value = glm::vec2(
 								value[0].get<float>(),
 								value[1].get<float>()
 							);
 						} else if(value.size() == 3) {
-							params[key] = glm::vec3(
+							params[key].value = glm::vec3(
 								value[0].get<float>(),
 								value[1].get<float>(),
 								value[2].get<float>()
 							);
 						} else if(value.size() == 4) {
-							params[key] = glm::vec4(
+							params[key].value = glm::vec4(
 								value[0].get<float>(),
 								value[1].get<float>(),
 								value[2].get<float>(),
 								value[3].get<float>()
 							);
 						} else {
-							::util::fail_error("Invalid vector with ", value.size(), " items.");
+							::util::fail_error("Invalid number of vector items: {} is not in [1, 4].", value.size());
 						}
 					}
+				}
+			}
+
+			if(res.contains("textures")) {
+				::util::json::assert_type(res["textures"], ::util::json::value_kind::array);
+				for(const auto &tex_json : res["textures"]) {
+					::util::json::assert_type(tex_json, ::util::json::value_kind::object);
+					::util::json::assert_contains(tex_json, "unit");
+					::util::json::assert_type(tex_json["unit"], ::util::json::value_kind::number);
+					textures.push_back({});
+					textures.back().unit = tex_json["unit"].get<unsigned int>();
+					::util::json::read_res_name_or_uuid(tex_json, "name", "uuid", m, textures.back().texture.id);
+					m.add_dependency(id, textures.back().texture.id);
 				}
 			}
 		}
@@ -811,15 +1085,15 @@ namespace gfx {
 	public:
 		void unload(::res::res_manager &m, const ::res::res_id_type &id) {}
 		void load_from_file(::res::res_manager &m, const ::res::res_id_type &id, const stdfs::path &path) {
-			std::cerr << " -- loading model -- @" << path << std::endl;
-			auto res = ::util::read_json_file(path);
-			::util::json_assert_type(res, ::util::json_value_type::object);
-			::util::json_assert_contains(res, "parts");
-			::util::json_assert_type(res["parts"], ::util::json_value_type::array);
+			clog.println("path: {}", path);
+			auto res = ::util::json::read_file(path);
+			::util::json::assert_type(res, ::util::json::value_kind::object);
+			::util::json::assert_contains(res, "parts");
+			::util::json::assert_type(res["parts"], ::util::json::value_kind::array);
 			for(auto &part : res["parts"]) {
-				::util::json_assert_type(part, ::util::json_value_type::object);
-				::util::json_assert_contains(part, "mesh");
-				::util::json_assert_contains(part, "material");
+				::util::json::assert_type(part, ::util::json::value_kind::object);
+				::util::json::assert_contains(part, "mesh");
+				::util::json::assert_contains(part, "material");
 			}
 		}
 	};
@@ -828,7 +1102,7 @@ namespace gfx {
 	public:
 		static void init() {
 			if(gl3wInit() < 0)
-				::util::fail_error("Failed to initialize gl3w");
+				::util::fail_error("Failed to initialize gl3w.");
 		}
 	};
 
@@ -839,10 +1113,10 @@ namespace gfx {
 
 		static void init() {
 			glfwSetErrorCallback([](int error, const char *message) {
-				::util::print_error("GLFW Error: ", error, ": ", message);
+				::util::print_error("GLFW Error [{}] {}", error, message);
 			});
 
-			if(!glfwInit()) ::util::fail_error("Failed to initialize GLFW");
+			if(!glfwInit()) ::util::fail_error("Failed to initialize GLFW.");
 			else initialized_ = true;
 		}
 
@@ -858,7 +1132,7 @@ namespace gfx {
 		static float get_time() { return glfwGetTime(); }
 	};
 
-	bool ::gfx::backend_glfw::initialized_ = false;
+	bool backend_glfw::initialized_ = false;
 
 	class window {
 		GLFWwindow *window;
@@ -872,7 +1146,7 @@ namespace gfx {
 			glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 			glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 			window = glfwCreateWindow(size.x, size.y, title, nullptr, nullptr);
-			if(window == nullptr) ::util::fail_error("Failed to create GLFW window");
+			if(window == nullptr) ::util::fail_error("Failed to create GLFW window.");
 			glfwSetWindowUserPointer(window, this);
 
 			glfwSetScrollCallback(window, [](GLFWwindow *window, double x_offset, double y_offset) {
@@ -935,19 +1209,19 @@ namespace gfx {
 	};
 
 	class renderer {
-		GLuint bound_vao = 0, bound_shader = 0;
+		GLuint bound_vao = 0, bound_program = 0;
 		bool depth_test = false;
 
 		::res::res_manager &resman;
 
-		void bind_vao(GLuint vao) {
+		void bind_vao_(GLuint vao) {
 			if(bound_vao != vao)
 				glBindVertexArray(bound_vao = vao);
 		}
 
-		void bind_shader(GLuint shader) {
-			if(bound_shader != shader)
-				glUseProgram(shader);
+		void bind_program_(GLuint program) {
+			if(bound_program != program)
+				glUseProgram(bound_program = program);
 		}
 
 		void set_depth_test(bool enabled) {
@@ -980,7 +1254,7 @@ namespace gfx {
 		}
 
 		void render(const ::gfx::mesh &mesh) {
-			bind_vao(mesh.vao);
+			bind_vao_(mesh.vao);
 			if(mesh.indexed) {
 				glDrawElements((GLenum)mesh.mode, mesh.index_count, GL_UNSIGNED_SHORT, nullptr);
 			} else {
@@ -990,13 +1264,42 @@ namespace gfx {
 
 		void render(const ::gfx::model &model) {
 			for(const auto &[mesh, material] : model.parts) {
-				bind_shader(material.get_from(resman).shader.get_from(resman).id);
+				bind_program_(material.get_from(resman).shader.get_from(resman).id);
 				render(mesh.get_from(resman));
 			}
 		}
 
-		void use(const ::gfx::shader &shader) {
-			bind_shader(shader.id);
+		void bind_material(::gfx::material &material) {
+			auto &shader = material.shader.get_from(resman);
+			bind_shader(shader);
+			for(auto &[name, param] : material.params) {
+				if(!param.dirty) continue;
+				if(std::holds_alternative<int>(param.value)) {
+					shader.set_uniform(name.c_str(), std::get<int>(param.value));
+				} else if(std::holds_alternative<float>(param.value)) {
+					shader.set_uniform(name.c_str(), std::get<float>(param.value));
+				} else if(std::holds_alternative<glm::vec2>(param.value)) {
+					shader.set_uniform(name.c_str(), std::get<glm::vec2>(param.value));
+				} else if(std::holds_alternative<glm::vec3>(param.value)) {
+					shader.set_uniform(name.c_str(), std::get<glm::vec3>(param.value));
+				} else if(std::holds_alternative<glm::vec4>(param.value)) {
+					shader.set_uniform(name.c_str(), std::get<glm::vec4>(param.value));
+				} else if(std::holds_alternative<glm::mat4>(param.value)) {
+					shader.set_uniform(name.c_str(), std::get<glm::mat4>(param.value));
+				} else assert(false && "bad material param value variant type");
+				param.dirty = false;
+			}
+			for(const auto &texture : material.textures) {
+				bind_texture(texture.unit, texture.texture.get_from(resman));
+			}
+		}
+
+		void bind_shader(const ::gfx::shader &shader) {
+			bind_program_(shader.id);
+		}
+
+		void bind_texture(int unit, const ::gfx::texture &texture) {
+			glBindTextureUnit(unit, texture.id);
 		}
 	};
 }
@@ -1039,6 +1342,9 @@ struct transform {
 };
 
 int main(int argc, char *argv[]) {
+	clog.set_spread_out(0);
+	std::atexit([](){ clog.flush(); });
+
 	gfx::backend_glfw::init();
 	gfx::window window;
 
@@ -1052,6 +1358,7 @@ int main(int argc, char *argv[]) {
 	resman.register_provider<gfx::material>("material");
 	resman.register_provider<gfx::mesh>("mesh");
 	resman.register_provider<gfx::model>("model");
+	resman.register_provider<gfx::texture>("texture");
 	resman.load_from_file("data/resman.json");
 	auto default_shader = resman.get_resource<gfx::shader>("shader.default");
 	auto default_material = resman.get_resource<gfx::material>("material.default");
@@ -1063,7 +1370,6 @@ int main(int argc, char *argv[]) {
 
 	gfx::renderer rend{resman};
 	rend.init();
-	rend.use(default_shader.get_from(resman));
 	
 	transform trans /* :o */ = {
 		.pos = glm::vec3(0.0f, 0.0f, 0.0f),
@@ -1083,16 +1389,6 @@ int main(int argc, char *argv[]) {
 
 	window.get_resize_hook().add([&](glm::ivec2 size) {
 		cam.aspect = window.aspect();
-	});
-
-	struct { glm::vec3 dir; glm::vec4 col; } sun = {
-		.dir = glm::normalize(glm::vec3(1.0f, 2.0f, -0.6f)),
-		.col = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f)
-	};
-
-	default_shader.context_from(resman, [&](const gfx::shader &shader) {
-		shader.set_uniform("uSunDir", sun.dir);
-		shader.set_uniform("uSunCol", sun.col);
 	});
 
 	float last_time = gfx::backend_glfw::get_time();
@@ -1132,14 +1428,13 @@ int main(int argc, char *argv[]) {
 			right_left_key_was_down = false;
 		}
 
-		default_shader.context_from(resman, [&](const gfx::shader &shader) {
-			shader.set_uniform("uTransform", cam.matrix() * trans.matrix());
-		});
+		default_material.get_from(resman).set("uTransform", cam.matrix() * trans.matrix());
 
 		auto current_mesh = resman.get_resource<gfx::mesh>(mesh_names[current_mesh_index]);
 
 		rend.pre_render();
 		rend.viewport(window.size());
+		rend.bind_material(default_material.get_from(resman));
 		rend.render(current_mesh.get_from(resman));
 		rend.post_render();
 
@@ -1152,6 +1447,5 @@ int main(int argc, char *argv[]) {
 	window.deinit();
 	
 	gfx::backend_glfw::deinit();
-
 	return 0;
 }
