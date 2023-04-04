@@ -988,7 +988,7 @@ namespace gfx {
 
 		struct param_type {
 			value_type value;
-			bool dirty = false;
+			bool dirty = true;
 
 			template<typename T>
 			void set(const T &t) {
