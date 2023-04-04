@@ -23,6 +23,12 @@
 			"path": "data/meshes/house.obj",
 			"uuid": "cd0d8df0-1586-461b-8b3f-84dc99c00608",
 			"name": "mesh.house"
+		},
+		{
+			"provider": "texture",
+			"path": "data/textures/flushed.png",
+			"uuid": "eab2be3b-c8fa-481b-b253-1ea18a0ca459",
+			"name": "texture.flushed"
 		}
 	]
 }
