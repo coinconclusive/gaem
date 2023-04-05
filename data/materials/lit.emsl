@@ -1,9 +1,9 @@
-
-program lit {
-	partial fragment(
-		
-	) {
-
+partial fragment partial_lit(
+	in normal: float3,
+	uniform U: { sun_dir: float3; sun_col: float4; }
+) {
+	export get(inout color: float3) {
+		const shade: float = clamp(dot(U.sun_dir, normal), 0.1, 1.0);
+		color = color * U.sun_col.xyz * shade * U.sun_col.w;
 	}
 }
-

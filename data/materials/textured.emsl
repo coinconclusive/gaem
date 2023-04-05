@@ -1,12 +1,15 @@
+partial fragment partial_textured(
+	in normal: float3,
+	uniform U: { sun_dir: float3; sun_col: float4; }
+) {
+	// clamp<T>(in[nameless] value: T, in[nameless] min_: T, in[nameless] max_: T) {
+	// 	if value < min_ { return min_; }
+	// 	if value > max_ { return max_; }
+	// 	return value;
+	// }
 
-program textured {
-	partial fragment(
-		in texcoord: float2,
-		uniform U: { texture: sampler2D; }
-	) {
-		default(): float3 {
-			return texture(U.texture, texcoord).rgb;
-		}
+	export run(inout color: float3) {
+		const shade: float = clamp(dot(U.sun_dir, normal), 0.1, 1.0);
+		color = color * U.sun_col.xyz * shade * U.sun_col.w;
 	}
 }
-

@@ -1,0 +1,13 @@
+partial vertex partial_vs(
+	uniform U: { transform: float4x4 },
+	in (location = 0) in_pos: float3,
+	in (location = 1) in_norm: float3,
+	in (location = 2) in_texcoord: float2,
+	out (global = gl_Position) vertex_position: float3,
+	out normal: float3,
+	out texcoord: float2
+) export run() {
+	normal = in_normal;
+	texcoord = in_texcoord;
+	vertex_position = U.transform * float4(in_pos, 1.0);
+}
