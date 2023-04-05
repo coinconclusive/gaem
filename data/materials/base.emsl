@@ -1,0 +1,59 @@
+
+partial fragment p_lit(
+	in normal: float3,
+	uniform U: { sun_dir: float3; sun_col: float4; }
+) {
+	export get(inout color: float3) {
+		const shade: float = clamp(dot(U.sun_dir, normal), 0.1, 1.0);
+		color = color * U.sun_col.xyz * shade * U.sun_col.w;
+	}
+}
+
+partial fragment p_textured(
+	in normal: float3,
+	uniform U: { sun_dir: float3; sun_col: float4; }
+) {
+	// clamp<T>(in[nameless] value: T, in[nameless] min_: T, in[nameless] max_: T) {
+	// 	if value < min_ { return min_; }
+	// 	if value > max_ { return max_; }
+	// 	return value;
+	// }
+
+	export run(inout color: float3) {
+		const shade: float = clamp(dot(U.sun_dir, normal), 0.1, 1.0);
+		color = color * U.sun_col.xyz * shade * U.sun_col.w;
+	}
+}
+
+partial vertex p_vs(
+	uniform U: { transform: float4x4 },
+	in (location = 0) in_pos: float3,
+	in (location = 1) in_norm: float3,
+	in (location = 2) in_texcoord: float2,
+	out (global = gl_Position) vertex_position: float3,
+	out normal: float3,
+	out texcoord: float2
+) export run() {
+	normal = in_normal;
+	texcoord = in_texcoord;
+	vertex_position = U.transform * float4(in_pos, 1.0);
+}
+
+program base(
+	uniform UniformBuffer: {
+		partial textured: p_textured,
+		partial lit: p_lit,
+		partial vs: p_vs,
+	}
+) {
+	vertex(partial vs: p_vs) { vs.run(); }
+	fragment(
+		out (location = 0) out_color: float4,
+		partial textured: p_textured,
+		partial lit: p_lit
+	) {
+		out_color = textured.get();
+		lit.run(color = out_color);
+	}
+}
+

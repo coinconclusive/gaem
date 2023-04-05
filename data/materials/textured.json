@@ -1,0 +1,13 @@
+{
+	"inherit": { "name": "material.base" },
+	"shader": "shader.textured",
+	"params": {
+		"uTexture": "int"
+	},
+	"textures": [
+		{
+			"unit": 0,
+			"name": "texture.error"
+		}
+	]
+}

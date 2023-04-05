@@ -1,0 +1,12 @@
+
+program textured {
+	partial fragment(
+		in texcoord: float2,
+		uniform U: { texture: sampler2D; }
+	) {
+		default(): float3 {
+			return texture(U.texture, texcoord).rgb;
+		}
+	}
+}
+

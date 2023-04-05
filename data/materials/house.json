@@ -1,0 +1,12 @@
+{
+	"inherit": [
+		{ "name": "material.textured" },
+		{ "name": "material.lit" }
+	],
+	"textures": [
+		{
+			"unit": 0,
+			"name": "texture.house"
+		}
+	]
+}

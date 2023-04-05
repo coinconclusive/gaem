@@ -2,6 +2,7 @@
 out vec4 oColor;
 
 in vec3 sNormal;
+in vec3 sNormal;
 in vec2 sTexCoord;
 
 uniform vec3 uSunDir;
