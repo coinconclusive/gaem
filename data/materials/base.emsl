@@ -1,16 +1,25 @@
 // NB: This is a template file.
 program %%program_name%% (
-//%%pars_fmt=partial %%name%%: %%name%%;
-	uniform %%uniform_buffer_name%%: { %%pars%% }
+	partial %%partials%%,
+	shared normal: float3,
+	shared texcoord: float2,
+	%%uniforms%%
 ) {
-	vertex(partial vs: %%vs_par_name%%) { %%vertex_code%% }
+	vertex(
+		in (location = 0) in_pos: float3,
+		in (location = 1) in_norm: float3,
+		in (location = 2) in_texcoord: float2,
+		out (global = gl_Position) out_position: float3
+	) entry {
+		normal = in_normal;
+		texcoord = in_texcoord;
+		out_position = %%vs_src_par_name%%.%%vs_src_par_run%%();
+
+	}
 	fragment(
 		out (location = 0) out_color: float4,
-//%%fs_pars_fmt=partial %%name%%: %%name%%;
-		%%fs_pars%%
-	) {
+	) entry {
 		out_color = %%fs_src_par_name%%.%%fs_src_par_fun%%();
-//%%fs_mod_pars_fmt=%%name%%.%%fun%%(%%inp%% = out_color);
 		%%fs_mod_pars%%
 	}
 }
