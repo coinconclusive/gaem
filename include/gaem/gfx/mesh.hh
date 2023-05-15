@@ -11,7 +11,7 @@ namespace gaem::gfx {
 	};
 
 	class mesh {
-		friend gfx::renderer;
+		// friend class gfx::renderer;
 		bool indexed_;
 		unsigned int vao_, vbo_, ebo_;
 		std::size_t vertex_count_, index_count_;

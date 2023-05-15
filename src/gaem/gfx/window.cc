@@ -4,7 +4,7 @@
 
 namespace gaem::gfx {
 	void window::init(const char *title, glm::ivec2 size) {
-		if(!backend_glfw::is_initialized()) util::fail_error("GLFW not initlaized.");
+		// if(!backend_glfw::is_initialized()) util::fail_error("GLFW not initlaized.");
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
 		glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -48,8 +48,8 @@ namespace gaem::gfx {
 	}
 
 	void window::deinit() {
-		if(!gfx::backend_glfw::is_initialized())
-			util::fail_error("GLFW not initlaized.");
+		// if(!gfx::backend_glfw::is_initialized())
+		// 	util::fail_error("GLFW not initlaized.");
 		glfwDestroyWindow((GLFWwindow*)window);
 	}
 

@@ -5,7 +5,7 @@
 
 namespace gaem::gfx {
 	class shader {
-		friend renderer;
+		// friend renderer;
 		unsigned int id_;
 	public:
 		void unload(res::res_manager &m, const res::res_id_type &id);

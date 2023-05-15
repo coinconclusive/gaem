@@ -1,0 +1,11 @@
+module type partial fragment
+
+in #normal in_normal float3
+
+uniform #sun_dir u_sun_dir float3
+uniform #sun_col u_sun_col float4
+
+main(in col float4)
+	let shade float = clamp(dot(u_sun_dir, in_normal), 0.0, 1.0)
+	let shade_col float3 = u_sun_col.xyz * shade * u_sun_col.w
+	return shade_col * col

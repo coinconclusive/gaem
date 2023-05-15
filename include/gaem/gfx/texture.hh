@@ -5,7 +5,7 @@
 
 namespace gaem::gfx {
 	class texture {
-		friend renderer;
+		// friend renderer;
 		unsigned int id_;
 		glm::ivec2 size_;
 	public:

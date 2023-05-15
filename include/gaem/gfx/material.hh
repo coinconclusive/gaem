@@ -8,7 +8,7 @@
 
 namespace gaem::gfx {
 	class material {
-		friend gfx::renderer;
+		// friend gfx::renderer;
 
 		struct texture_binding {
 			using unit_type = unsigned int;

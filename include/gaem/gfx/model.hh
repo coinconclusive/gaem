@@ -7,7 +7,7 @@
 
 namespace gaem::gfx {
 	class model {
-		friend gfx::renderer;
+		// friend gfx::renderer;
 		std::vector<std::pair<res_ref<gfx::mesh>, res_ref<gfx::material>>> parts;
 	public:
 		void unload(res::res_manager &m, const res::res_id_type &id);

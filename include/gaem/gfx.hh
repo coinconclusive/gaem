@@ -9,7 +9,6 @@
 #include <gaem/resource.hh>
 
 namespace gaem::gfx {
-	class renderer;
 	class shader;
 	class texture;
 	class material;

@@ -1,4 +1,4 @@
 {
 	"shader": "shader.default",
-	"params": { "uTransform": "mat4" }
+	"params": { "u_transform": "float4x4" }
 }

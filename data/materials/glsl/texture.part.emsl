@@ -1,0 +1,8 @@
+module type partial fragment
+
+in #texcoord in_texcoord float2
+
+uniform #texture u_texture sampler2D
+
+main(in _ float4)
+	return texture(u_texture)
