@@ -6,11 +6,11 @@ namespace gaem::gfx {
 		std::vector<int> to_delete; // indices that will be deleted.
 		std::unordered_map<texture_binding::unit_type, int> used_units; // unit -> last index using it.
 		used_units.reserve(bindings_.size()); // too much, but will fit all.
-		for(int i = 0; i < bindings_.size(); ++i) {
+		for(size_t i = 0; i < bindings_.size(); ++i) {
 			const auto &binding = bindings_[i];
 			auto unit = used_units[binding.unit];
 			if(used_units.contains(unit)) {
-				m.remove_dependency(id, binding.texture.id);
+				m.remove_dependency(id, binding.tex.id);
 				to_delete.push_back(i);
 				used_units[unit] = i;
 			}
@@ -127,8 +127,8 @@ namespace gaem::gfx {
 				util::json::assert_type(tex_json["unit"], util::json::value_kind::number);
 				bindings_.push_back({});
 				bindings_.back().unit = tex_json["unit"].get<unsigned int>();
-				util::json::read_res_name_or_uuid(tex_json, "name", "uuid", m, bindings_.back().texture.id);
-				m.add_dependency(id, bindings_.back().texture.id);
+				util::json::read_res_name_or_uuid(tex_json, "name", "uuid", m, bindings_.back().tex.id);
+				m.add_dependency(id, bindings_.back().tex.id);
 			}
 		}
 

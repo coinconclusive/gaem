@@ -12,7 +12,7 @@ namespace gaem::gfx {
 
 		struct texture_binding {
 			using unit_type = unsigned int;
-			res_ref<texture> texture;
+			res_ref<texture> tex;
 			unit_type unit;
 		};
 

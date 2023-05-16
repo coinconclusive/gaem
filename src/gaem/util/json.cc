@@ -19,6 +19,7 @@ namespace gaem::util::json {
 		case nmann::detail::value_t::number_float:
 		case nmann::detail::value_t::binary:
 		case nmann::detail::value_t::discarded:
+		default:
 			return value_kind::number;
 		}
 	}
@@ -32,5 +33,6 @@ namespace gaem::util::json {
 		case value_kind::number: return "number";
 		case value_kind::boolean: return "boolean";
 		}
+		return "?";
 	}
 }

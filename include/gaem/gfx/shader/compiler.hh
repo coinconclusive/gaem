@@ -13,7 +13,7 @@ namespace gaem::gfx::emsl {
 	enum class shader_type { vertex, fragment };
 
 	enum class shader_module_value_type {
-		float1, float2, float3, float4, float4x4, sampler2D, void1
+		float1, float2, float3, float4, float4x4, sampler2D, void1, int1
 	};
 
 	struct shader_module_variable {
@@ -34,7 +34,7 @@ namespace gaem::gfx::emsl {
 	};
 
 	struct shader_module_field : shader_module_variable {
-		std::variant<std::string, int> tag;
+		std::variant<std::monostate, std::string, int> tag;
 		shader_module_field_type field_type;
 	};
 
@@ -45,6 +45,7 @@ namespace gaem::gfx::emsl {
 		std::vector<shader_module_parameter> params;
 		std::string name;
 		shader_module_source_code *code;
+		~shader_module_function();
 	};
 
 	class shader_module {
