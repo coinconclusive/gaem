@@ -1,0 +1,17 @@
+
+module vert_entry;
+module type vertex;
+
+in 0 in_pos float3;
+in 1 in_normal float3;
+in 2 in_texcoord float2;
+
+out #normal out_normal float3;
+out #texcoord out_texcoord float2;
+
+func entry() void {
+	gl_Position = partial(in_pos);
+	out_normal = in_normal;
+	out_texcoord = in_texcoord;
+}
+

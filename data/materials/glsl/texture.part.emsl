@@ -1,8 +1,12 @@
-module type partial fragment
 
-in #texcoord in_texcoord float2
+module texture;
+module type partial fragment;
 
-uniform #texture u_texture sampler2D
+in #texcoord in_texcoord float2;
 
-main(in _ float4)
-	return texture(u_texture)
+uniform #texture u_texture sampler2D;
+
+func entry(_ float4) float4 {
+	return texture(u_texture);
+}
+

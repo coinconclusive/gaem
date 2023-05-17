@@ -120,7 +120,7 @@ namespace gaem::gfx::emsl {
 	using value_type = shader_module_value_type;
 
 	struct codegen {
-		std::ostringstream fout;
+		std::ostream &fout;
 		int indent;
 		bool last_nl = true;
 
@@ -166,6 +166,25 @@ namespace gaem::gfx::emsl {
 		void generate_function(const shader_module_function &func);
 	};
 
+	// renaming
+	struct alpha_converter {
+		strv old_name, new_name;
+		bool visit(struct ast_name &n);
+		bool visit(struct ast_int &n);
+		bool visit(struct ast_float &n);
+		bool visit(struct ast_return &n);
+		bool visit(struct ast_block &n);
+		bool visit(struct ast_access &n);
+		bool visit(struct ast_call &n);
+		bool visit(struct ast_bin &n);
+		bool visit(struct ast_unr &n);
+		bool visit(struct ast_let &n);
+		bool visit(struct ast_set &n);
+
+		// NB: doesn't rename fields.
+		void visit_module(shader_module &mod);
+	};
+
 	struct typechecker {
 		void visit(struct ast_let &n);
 		void visit(struct ast_set &n);
@@ -177,6 +196,7 @@ namespace gaem::gfx::emsl {
 		virtual ~ast() = default;
 
 		virtual void accept(codegen &v) = 0;
+		virtual bool accept(alpha_converter &v) = 0;
 		// virtual void accept(typechecker &v) = 0;
 	};
 
@@ -185,6 +205,7 @@ namespace gaem::gfx::emsl {
 	template<typename T>
 	struct impl_ast : ast {
 		void accept(codegen &v) final { v.visit(*(T*)this); }
+		bool accept(alpha_converter &v) final { return v.visit(*(T*)this); }
 		// void accept(typechecker &v) { v.visit(*(T*)this); }
 		impl_ast(const location &where) : ast(where) {}
 	};
@@ -452,7 +473,14 @@ namespace gaem::gfx::emsl {
 		}
 
 		astp parse_expr() {
-			return parse_sum();
+			astp r = parse_sum();
+			if(peek().type == '=') {
+				const auto &t = eat();
+				return std::make_unique<ast_set>(
+					t.where, std::move(r), parse_expr()
+				);
+			}
+			return r;
 		}
 
 		std::unique_ptr<ast_let> parse_let() {
@@ -505,13 +533,12 @@ namespace gaem::gfx::emsl {
 
 			func.name = expect(tt_id).value;
 
-			std::vector<shader_module_parameter> params;
 			expect_dont_eat('(');
 			if(peek(2).type != ')') {
 				do {
 					eat();
-					params.push_back({});
-					shader_module_parameter &param = params.back();
+					func.params.push_back({});
+					shader_module_parameter &param = func.params.back();
 					param.name = expect(tt_id, "for parameter name").value;
 					const auto &type = expect(tt_id, "for parameter type");
 					param.type = typename_to_value_type(type.value, type.where);
@@ -539,6 +566,9 @@ namespace gaem::gfx::emsl {
 		}
 
 		void parse_module(shader_module &mod) {
+			expect_kw("module");
+			mod.name = expect(tt_id, "module name").value;
+			expect(';');
 			expect_kw("module");
 			expect_kw("type");
 			parse_module_type(mod.type);
@@ -634,6 +664,7 @@ namespace gaem::gfx::emsl {
 	}
 
 	void codegen::generate_module(const shader_module &mod) {
+		gen("#pragma module_name {}\n", mod.name);
 		gen("#pragma shader_type ");
 		switch(mod.type) {
 		case shader_module_type::entry_vertex: gen("entry_vertex"); break;
@@ -651,13 +682,16 @@ namespace gaem::gfx::emsl {
 	}
 
 	void codegen::generate_field(const shader_module_field &field) {
-		switch(field.field_type) {
-		case shader_module_field_type::input: gen("in "); break;
-		case shader_module_field_type::output: gen("out "); break;
-		case shader_module_field_type::uniform: gen("out "); break;
+		if(holds_alternative<int>(field.tag)) {
+			gen("layout (location = {}) ", std::get<int>(field.tag));
 		}
-		gen("/* TAG: {} */ {} {};\n",
-			field.tag, value_type_to_typename(field.type), field.name);
+
+		switch(field.field_type) {
+		case shader_module_field_type::input: gen("in"); break;
+		case shader_module_field_type::output: gen("out"); break;
+		case shader_module_field_type::uniform: gen("uniform"); break;
+		}
+		gen(" {} {};\n", value_type_to_typename(field.type), field.name);
 	}
 	
 	void codegen::generate_function(const shader_module_function &func) {
@@ -675,7 +709,7 @@ namespace gaem::gfx::emsl {
 			generate_param(func.params[0]);
 			for(size_t i = 1; i < func.params.size(); ++i) {
 				gen(", ");
-				generate_param(func.params[0]);
+				generate_param(func.params[i]);
 			}
 		}
 		gen(") ");
@@ -700,7 +734,7 @@ namespace gaem::gfx::emsl {
 
 		code.clear(); // hopefully free memory
 
-		for(const auto &tok : toks) print_token(stderr, tok, path.c_str());
+		// for(const auto &tok : toks) print_token(stderr, tok, path.c_str());
 
 		parser par { 0, { toks.begin(), toks.end() } };
 		try {
@@ -711,12 +745,157 @@ namespace gaem::gfx::emsl {
 			throw std::runtime_error("could not compile shader module");
 		}
 
-		codegen cg{};
-		cg.generate_module(mod);
-		fmt::print("\n-------------- GENERATED CODE --------------\n");
-		fmt::print("{}", cg.fout.str());
-		fmt::print("\n--------------------------------------------\n");
-
 		return mod;
+	}
+
+	bool alpha_converter::visit(struct ast_name &n) {
+		if(n.name == old_name) n.name = new_name;
+		return false;
+	}
+
+	bool alpha_converter::visit(struct ast_int &n) { return false; }
+	bool alpha_converter::visit(struct ast_float &n) { return false; }
+	bool alpha_converter::visit(struct ast_access &n) { return false; }
+
+	bool alpha_converter::visit(struct ast_return &n) {
+		if(n.val.has_value()) n.val->get()->accept(*this);
+		return false;
+	}
+
+	bool alpha_converter::visit(struct ast_block &n) {
+		for(auto &s : n.stmts) if(s->accept(*this)) break;
+		return false;
+	}
+
+	bool alpha_converter::visit(struct ast_call &n) {
+		n.func->accept(*this);
+		for(auto &param : n.params) param->accept(*this);
+		return false;
+	}
+
+	bool alpha_converter::visit(struct ast_bin &n) {
+		n.lhs->accept(*this);
+		n.rhs->accept(*this);
+		return false;
+	}
+
+	bool alpha_converter::visit(struct ast_unr &n) {
+		n.val->accept(*this);
+		return false;
+	}
+
+	bool alpha_converter::visit(struct ast_let &n) {
+		if(n.val.has_value()) n.val->get()->accept(*this);
+		if(n.name == new_name) return true;
+		return false;
+	}
+
+	bool alpha_converter::visit(struct ast_set &n) {
+		n.var->accept(*this);
+		n.val->accept(*this);
+		return false;
+	}
+
+	void alpha_converter::visit_module(shader_module &mod) {
+		for(auto &func : mod.functions) {
+			func.code->ast->accept(*this);
+		}
+	}
+
+	constexpr shader_type shader_module_type_to_shader_type(shader_module_type type) {
+		switch(type) {
+		case shader_module_type::entry_fragment: return shader_type::fragment;
+		case shader_module_type::partial_fragment: return shader_type::fragment;
+		case shader_module_type::entry_vertex: return shader_type::vertex;
+		case shader_module_type::partial_vertex: return shader_type::vertex;
+		}
+	}
+
+	constexpr bool is_shader_module_type_entry(shader_module_type type) {
+		return type == shader_module_type::entry_fragment
+		    || type == shader_module_type::entry_vertex;
+	}
+
+	void link_modules(
+		std::ostream &fout,
+		shader_type type,
+		std::span<shader_module> modules,
+		strv shader_main
+	) {
+		std::unordered_map<std::string, size_t> fields_by_tag;
+		std::vector<shader_module_field> unique_fields;
+		std::vector<std::reference_wrapper<shader_module_function>> functions;
+		std::string entry_point_name;
+		std::vector<std::string> partial_entry_names;
+
+		for(auto &mod : modules) {
+			if(shader_module_type_to_shader_type(mod.type) != type) {
+				throw std::runtime_error("incompatible shader module '" + mod.name + "' type");
+			}
+
+			// mangle function names
+			bool had_entry = false;
+			for(auto &func : mod.functions) {
+				bool is_entry = func.name == "entry";
+				func.name = "_" + mod.name + "__" + func.name;
+				functions.emplace_back(func);
+
+				if(is_entry) {
+					if(had_entry) {
+						throw std::runtime_error("multiple entry points");
+					}
+
+					had_entry = true;
+
+					if(is_shader_module_type_entry(mod.type)) {
+						entry_point_name = func.name;
+					} else {
+						partial_entry_names.push_back(func.name);
+					}
+				}
+			}
+
+			if(!had_entry && is_shader_module_type_entry(mod.type)) {
+				throw std::runtime_error("no entry point for non-partial shader module");
+			}
+
+			// eliminate fields with the same tag.
+			for(auto &field : mod.fields) {
+				std::string old_name = field.name;
+				if(std::holds_alternative<std::string>(field.tag)) {
+					if(!fields_by_tag.contains(std::get<std::string>(field.tag))) {
+						fields_by_tag[std::get<std::string>(field.tag)] = unique_fields.size();
+						field.name = "_" + std::get<std::string>(field.tag);
+						unique_fields.push_back(field);
+					}
+				} else {
+					field.name = "_" + mod.name + "__" + field.name; // mangle name
+					unique_fields.push_back(field);
+				}
+				alpha_converter ac{old_name, field.name};
+				ac.visit_module(mod); // rename fields.
+			}
+		}
+
+		if(entry_point_name.empty()) { // shouldn't happen, but there for safety.
+			throw std::runtime_error("no entry point");
+		}
+
+		codegen cg{fout};
+
+		for(const auto &field : unique_fields)
+			cg.generate_field(field);
+
+		fmt::print(fout, "\nvec4 partial(vec4 i);\n");
+
+		for(const auto &func : functions)
+			cg.generate_function(func);
+		
+		// TODO: types...
+		fmt::print(fout, "\nvec4 partial(vec4 i) {{\n");
+		for(auto &name : partial_entry_names)
+			fmt::print(fout, "  i = {}(i);\n", name);
+		fmt::print(fout, "}}\n");
+		fmt::print(fout, "void {}() {{ {}(); }}\n", shader_main, entry_point_name);
 	}
 }

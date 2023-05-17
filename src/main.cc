@@ -10,6 +10,7 @@
 #include <gaem/gfx/renderer.hh>
 #include <gaem/gfx/window.hh>
 #include <gaem/gfx/shader/compiler.hh>
+#include <iostream>
 
 struct spherical_camera {
 	glm::vec3 pos;
@@ -51,10 +52,14 @@ struct transform {
 int main(int argc, char *argv[]) {
 	using namespace gaem;
 	clog.set_spread_out(0);
-	std::atexit([](){ clog.flush(); });
+	// std::atexit([](){ clog.flush(); });
 
-	fmt::print(stderr, "compiling module:\n");
-	gfx::emsl::compile_module("data/materials/glsl/lit.part.emsl");
+	gfx::emsl::shader_module mods[] = {
+		gfx::emsl::compile_module("data/materials/glsl/frag_entry.emsl"),
+		gfx::emsl::compile_module("data/materials/glsl/texture.part.emsl"),
+		gfx::emsl::compile_module("data/materials/glsl/lit.part.emsl"),
+	};
+	gfx::emsl::link_modules(std::cerr, gfx::emsl::shader_type::fragment, { mods });
 
 	return 0;
 

@@ -1,9 +1,0 @@
-module type partial vertex
-
-in #pos in_pos float4
-
-uniform #transform u_transform float4x4
-
-main(in pos float4)
-	pos = in_pos * u_transform
-	return pos

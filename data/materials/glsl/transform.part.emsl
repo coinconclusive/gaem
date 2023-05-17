@@ -1,0 +1,10 @@
+
+module transform;
+module type partial vertex;
+
+uniform #transform u_transform float4x4
+
+func entry(pos float4) float4 {
+	return in_pos * u_transform;
+}
+

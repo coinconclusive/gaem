@@ -13,7 +13,8 @@ namespace gaem::gfx::emsl {
 	enum class shader_type { vertex, fragment };
 
 	enum class shader_module_value_type {
-		float1, float2, float3, float4, float4x4, sampler2D, void1, int1
+		float1, float2, float3, float4,
+		float4x4, sampler2D, void1, int1
 	};
 
 	struct shader_module_variable {
@@ -50,6 +51,7 @@ namespace gaem::gfx::emsl {
 
 	class shader_module {
 	public:
+		std::string name;
 		shader_module_type type;
 		std::vector<shader_module_function> functions;
 		std::vector<shader_module_field> fields;
@@ -58,9 +60,16 @@ namespace gaem::gfx::emsl {
 	/** compile shader modules */
 	shader_module compile_module(const stdfs::path &path);
 
-	/** link modules (partials, program entry points, shared variables, etc.)
-	  * and generate source code for a shader type from the linked modules */
-	std::string link_modules(shader_type type, std::span<shader_module> modules);
+	/** link (and consumes! copy if need to save) modules
+	  * (partials, program entry points, fields, etc.)
+	  * and generate source code for a shader type from the
+	  * linked modules */
+	void link_modules(
+		std::ostream &fout,
+		shader_type type, 
+		std::span<shader_module> modules,
+		strv entry_point = "main"
+	);
 }
 
 #endif // GAEM_GFX_SHADER_COMPILER_HH_
